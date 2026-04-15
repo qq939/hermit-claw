@@ -515,6 +515,8 @@ def create_app(docker_client=None):
         background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
         box-shadow: var(--shadow);
       }}
+      .card.collapsed .card-body {{ display: none; }}
+      .collapse-btn {{ background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px; }}
       .card-head {{
         display: flex;
         justify-content: space-between;
@@ -593,18 +595,22 @@ def create_app(docker_client=None):
 
       function makeCard(item) {{
         const div = document.createElement("div");
-        div.className = "card";
+        div.className = "card collapsed";
         div.dataset.name = item.container_name;
         const stCls = item.status === "running" ? "status-running" : "status-other";
         const managed = !!item.managed;
         div.innerHTML = `
           <div class="card-head">
-            <div>
-              <div>${{item.container_name}}</div>
-              <div class="meta">${{item.agent_type}} · ${{item.host_port}}:${SERVICE_PORT}</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button class="collapse-btn" data-action="collapse">▶</button>
+              <div>
+                <div>${{item.container_name}}</div>
+                <div class="meta">${{item.agent_type}} · ${{item.host_port}}:${SERVICE_PORT}</div>
+              </div>
             </div>
             <div class="meta ${{stCls}}">${{item.status}}</div>
           </div>
+          <div class="card-body">
           <div class="actions">
             <button data-action="refresh">查看日志</button>
             <button data-action="download">下载日志</button>
@@ -619,7 +625,14 @@ def create_app(docker_client=None):
             <button data-action="exec">执行</button>
           </div>
           <pre id="log-${{item.container_name}}">${{item.logs || ""}}</pre>
+          </div>
         `;
+        const collapseBtn = div.querySelector('.collapse-btn');
+        const cardBody = div.querySelector('.card-body');
+        collapseBtn.onclick = () => {{
+          div.classList.toggle("collapsed");
+          collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
+        }};
         const logBox = div.querySelector("pre");
         const cmdInput = div.querySelector('[data-role="cmd-input"]');
         const cmdMode = div.querySelector('[data-role="cmd-mode"]');
