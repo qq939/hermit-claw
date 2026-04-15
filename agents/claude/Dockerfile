@@ -4,7 +4,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates sudo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
 RUN useradd -m -s /bin/bash agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
