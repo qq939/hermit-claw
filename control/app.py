@@ -669,12 +669,12 @@ def create_app(docker_client=None):
              // 如果输入不是以常见 shell 命令开头，认为是一句对话
              if (!raw.match(/^(ls|cd|pwd|cat|echo|claude|rm|mkdir|touch)/)) {{
                 const escaped = raw.replaceAll('"', '\\"');
-                command = `claude --dangerously-skip-permissions --print "${{escaped}}"`; // 现在要求卡片显示真实的底层命令
-                execCmd = `PAGER=cat claude --dangerously-skip-permissions --print "${{escaped}}"`;
+                command = `claude --dangerously-skip-permissions --continue --print "${{escaped}}"`;
+                execCmd = `PAGER=cat claude --dangerously-skip-permissions --continue --print "${{escaped}}"`;
              }} else if (raw.startsWith("claude")) {{
                 if (raw.trim() === "claude") {{
-                    command = `claude --dangerously-skip-permissions -p ""`;
-                    execCmd = `PAGER=cat claude --dangerously-skip-permissions -p ""`;
+                    command = `claude --dangerously-skip-permissions --continue -p ""`;
+                    execCmd = `PAGER=cat claude --dangerously-skip-permissions --continue -p ""`;
                 }} else {{
                     command = raw;
                     execCmd = `PAGER=cat ${{raw}}`;
