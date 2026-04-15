@@ -661,11 +661,8 @@ def create_app(docker_client=None):
           let command = raw;
           let execCmd = raw;
           
-          // 如果用户只是输入聊天内容（而不是 shell 命令），我们自动帮他包装成 agent 调用
+          // 如果用户只是输入聊天内容（而不是 shell 命令），我们自动帮他包装成 agent调用
           if (item.agent_type === "claude") {{
-             // 过滤掉 ANSI 乱码
-             const cleanOutput = (text) => text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-
              // 如果输入不是以常见 shell 命令开头，认为是一句对话
              if (!raw.match(/^(ls|cd|pwd|cat|echo|claude|rm|mkdir|touch)/)) {{
                 const escaped = raw.replaceAll('"', '\\"');
@@ -708,11 +705,6 @@ def create_app(docker_client=None):
             window.cardStates[item.container_name] += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
           }} else {{
             let outText = d.output || "(no output)";
-            // Improved ANSI stripping regex
-            outText = outText.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-            outText = outText.replace(/\x1b\][^\x07]*\x07/g, '');
-            outText = outText.replace(/\x1b[\(\)][A-Z]/g, ''); // charsets
-            outText = outText.replace(/\x1b[=>]/g, ''); // keypad modes
             
             if (item.agent_type === "openclaw@2026.2.9") {{
                if (execCmd.includes("--json")) {{
@@ -723,11 +715,6 @@ def create_app(docker_client=None):
                      }}
                   }} catch(e){{}}
                }}
-               const cleanOutput = (text) => text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-               outText = cleanOutput(outText);
-            }} else if (item.agent_type === "claude") {{
-               const cleanOutput = (text) => text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-               outText = cleanOutput(outText);
             }}
             window.cardStates[item.container_name] += outText + "\\n";
           }}
