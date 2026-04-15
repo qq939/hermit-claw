@@ -46,6 +46,16 @@ def create_app(docker_client=None):
     app.config["CONFIG_ROOT"] = "/config"
     app.config["WORKSPACES_ROOT"] = "/workspaces"
     app.config["HOST_CONFIG_ROOT"] = os.environ.get(HOST_CONFIG_ROOT_ENV) or app.config["CONFIG_ROOT"]
+    # 容器内将 host.docker.internal 替换为宿主机实际路径（如果是相对路径 ./config）
+    host_cfg = app.config["HOST_CONFIG_ROOT"]
+    if host_cfg.startswith("./"):
+        import subprocess
+        try:
+            pwd = subprocess.check_output(["sh", "-c", "echo $PWD"], text=True).strip()
+            host_cfg = pwd + host_cfg[1:]
+        except:
+            pass
+        app.config["HOST_CONFIG_ROOT"] = host_cfg
     app.config["HOST_WORKSPACES_ROOT"] = os.environ.get(HOST_WORKSPACES_ROOT_ENV) or app.config["WORKSPACES_ROOT"]
 
     def docker_client_or_default():
