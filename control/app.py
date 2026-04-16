@@ -204,6 +204,16 @@ def create_app(docker_client=None):
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
         )
+
+        # 创建容器后发送初始消息
+        import time
+        time.sleep(3)
+        initial_message = "严格遵循USER.md，8082web app的具体需求稍后再与你沟通"
+        try:
+            container.exec_run(["/bin/sh", "-lc", f"echo '{initial_message}' > /tmp/initial_message.txt"], user=AGENT_RUNTIME_USER)
+        except Exception:
+            pass
+
         return {
             "container_name": container.name,
             "agent_type": agent_type,
