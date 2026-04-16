@@ -1,3 +1,10 @@
+---
+name: hermit-claw
+description: 创建容器化的claude agent/openclaw agent，agent对容器赋能，让容器介入智能
+license: Complete terms in LICENSE.txt
+---
+# 首次调用本技能需要执行命令docker compose up -d --build control-18080 agent-image-claude agent-image-openclaw 
+
 # 18080 Docker Agent 控制技能
 
 本技能用于通过 `http://localhost:18080` 控制和调用各个 Docker agent（`claude` / `openclaw@2026.2.9`）。
