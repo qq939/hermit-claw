@@ -149,10 +149,14 @@ def create_app(docker_client=None):
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
+        if agent_type == "claude":
+            log_bind = "/home/agent/.claude/workspace/project/logs"
+        else:
+            log_bind = "/home/agent/.openclaw/workspace/project/logs"
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
-            f"{host_workspaces_root}/{container_name}": {"bind": "/workspace", "mode": "rw"},
-            f"{host_logs_root}/{container_name}": {"bind": "/workspace/logs", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
@@ -248,10 +252,14 @@ def create_app(docker_client=None):
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
+        if agent_type == "claude":
+            log_bind = "/home/agent/.claude/workspace/project/logs"
+        else:
+            log_bind = "/home/agent/.openclaw/workspace/project/logs"
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
-            f"{host_workspaces_root}/{container_name}": {"bind": "/workspace", "mode": "rw"},
-            f"{host_logs_root}/{container_name}": {"bind": "/workspace/logs", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)
