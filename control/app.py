@@ -128,10 +128,19 @@ def create_app(docker_client=None):
         return base or "agent"
 
     def _tail_logs(container, tail):
-        raw = container.logs(tail=tail, stdout=True, stderr=True)
-        if isinstance(raw, bytes):
-            return raw.decode("utf-8", errors="replace")
-        return str(raw)
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type", "")
+        if agent_type == "claude":
+            log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
+        else:
+            log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
+        try:
+            result = container.exec_run(["/bin/sh", "-lc", f"tail -{tail} '{log_path}' 2>/dev/null"], user=AGENT_RUNTIME_USER)
+            if isinstance(result.output, bytes):
+                return result.output.decode("utf-8", errors="replace")
+            return str(result.output)
+        except Exception:
+            return ""
 
     def create_agent(agent_type, custom_name, body=None):
         if agent_type not in AGENT_SPECS:
