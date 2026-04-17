@@ -57,6 +57,17 @@ def create_app(docker_client=None):
             pass
         app.config["HOST_CONFIG_ROOT"] = host_cfg
     app.config["HOST_WORKSPACES_ROOT"] = os.environ.get(HOST_WORKSPACES_ROOT_ENV) or app.config["WORKSPACES_ROOT"]
+    # 处理相对路径 logs
+    host_ws = app.config["HOST_WORKSPACES_ROOT"]
+    if host_ws.startswith("./"):
+        import subprocess
+        try:
+            pwd = subprocess.check_output(["sh", "-c", "echo $PWD"], text=True).strip()
+            host_ws = pwd + host_ws[1:]
+        except:
+            pass
+        app.config["HOST_WORKSPACES_ROOT"] = host_ws
+    app.config["HOST_LOGS_ROOT"] = os.path.join(os.path.dirname(host_ws), "logs")
 
     def docker_client_or_default():
         configured = app.config.get("DOCKER_CLIENT")
@@ -137,9 +148,11 @@ def create_app(docker_client=None):
         }
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
+        host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
             f"{host_workspaces_root}/{container_name}": {"bind": "/workspace", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": "/workspace/logs", "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
@@ -234,9 +247,11 @@ def create_app(docker_client=None):
         spec = AGENT_SPECS[agent_type]
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
+        host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
             f"{host_workspaces_root}/{container_name}": {"bind": "/workspace", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": "/workspace/logs", "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)
