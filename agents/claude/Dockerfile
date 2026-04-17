@@ -1,7 +1,7 @@
 FROM node:20-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates sudo apache2-utils \
+    && apt-get install -y --no-install-recommends ca-certificates sudo \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
@@ -24,4 +24,4 @@ USER agent
 WORKDIR /home/agent/.claude/workspace/project
 EXPOSE 8082
 
-CMD ["/bin/sh", "-lc", "mkdir -p \"$HOME/.claude\"; if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.claude/\"; fi; node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[\"/home/agent/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(process.env.HOME+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; mkdir -p /home/agent/.claude/workspace/project/logs; if [ -f /tmp/initial_message.txt ]; then INITIAL_MSG=$(cat /tmp/initial_message.txt); rm -f /tmp/initial_message.txt; sleep 1; if [ -n \"$INITIAL_MSG\" ]; then nohup sh -c 'claude --dangerously-skip-permissions --continue --print \"$INITIAL_MSG\"' 2>&1 | tee /home/agent/.claude/workspace/project/logs/agent_tui.log.0; fi; fi; nohup claude 2>&1 | rotatelogs -l -f -t -s 50M -n 2 /home/agent/.claude/workspace/project/logs/agent_tui.log.%Y%m%d%H%M%S 2>/dev/null & exec tail -F -q /home/agent/.claude/workspace/project/logs/agent_tui.log.*"]
+CMD ["/bin/sh", "-lc", "mkdir -p \"$HOME/.claude\"; if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.claude/\"; fi; node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[\"/home/agent/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(process.env.HOME+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; mkdir -p /home/agent/.claude/workspace/project/logs; if [ -f /tmp/initial_message.txt ]; then INITIAL_MSG=$(cat /tmp/initial_message.txt); rm -f /tmp/initial_message.txt; sleep 1; if [ -n \"$INITIAL_MSG\" ]; then nohup sh -c 'claude --dangerously-skip-permissions --continue --print \"$INITIAL_MSG\"' 2>&1 | tee /home/agent/.claude/workspace/project/logs/agent_tui.log; fi; fi; nohup claude >/home/agent/.claude/workspace/project/logs/agent_tui.log 2>&1 & exec tail -F /home/agent/.claude/workspace/project/logs/agent_tui.log"]
