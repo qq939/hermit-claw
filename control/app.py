@@ -222,14 +222,15 @@ def create_app(docker_client=None):
             log_config=log_config,
         )
 
-        # 创建容器后发送初始消息
+        # 创建容器后发送初始消息（可选）
         import time
         time.sleep(5)
-        initial_message = "严格遵循USER.md，8082web app的具体需求稍后再与你沟通"
-        try:
-            container.exec_run(["/bin/sh", "-lc", f"echo '{initial_message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
-        except Exception:
-            pass
+        initial_message = body.get("initial_message") or "严格遵循USER.md，8082web app的具体需求稍后再与你沟通"
+        if initial_message:
+            try:
+                container.exec_run(["/bin/sh", "-lc", f"echo '{initial_message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
+            except Exception:
+                pass
 
         return {
             "container_name": container.name,
@@ -427,6 +428,25 @@ def create_app(docker_client=None):
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
             return jsonify({"error": "Container not found"}), 404
+
+    @app.post("/api/agents/<path:name>/send-message")
+    def api_send_message(name):
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify({"error": "message is required"}), 400
+        try:
+            container = _require_managed(name)
+            labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+            agent_type = labels.get("hermit.agent_type", "")
+            container.exec_run(["/bin/sh", "-lc", f"echo '{message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
+            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.post("/api/agents/<path:name>/restart")
     def api_restart_agent(name):
