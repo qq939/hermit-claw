@@ -445,8 +445,13 @@ def create_app(docker_client=None):
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
-            container.exec_run(["/bin/sh", "-lc", f"echo '{message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
-            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
+            if agent_type == "claude":
+                cmd = f"claude --dangerously-skip-permissions --continue --print '{message}'"
+            else:
+                cmd = f"openclaw agent --message '{message}'"
+            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER, tty=True)
+            output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
+            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "output": output, "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
