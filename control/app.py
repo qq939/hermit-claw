@@ -133,13 +133,14 @@ def create_app(docker_client=None):
             return raw.decode("utf-8", errors="replace")
         return str(raw)
 
-    def create_agent(agent_type, custom_name):
+    def create_agent(agent_type, custom_name, body=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
         host_port = find_next_port()
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
+        body = body or {}
         labels = {
             MANAGED_LABEL_KEY: MANAGED_LABEL_VALUE,
             "hermit.agent_type": agent_type,
@@ -360,7 +361,7 @@ def create_app(docker_client=None):
         agent_type = (body.get("type") or "").strip()
         name = body.get("name") or ""
         try:
-            payload = create_agent(agent_type, name)
+            payload = create_agent(agent_type, name, body)
             return jsonify(payload), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
