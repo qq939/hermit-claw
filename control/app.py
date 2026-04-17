@@ -225,18 +225,18 @@ def create_app(docker_client=None):
 
         # 创建容器后发送初始消息
         import time
-        time.sleep(5)
+        time.sleep(3)
         user_msg = (body.get("message") or "").strip()
         if agent_type == "claude":
             default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+            cmd = f"claude --dangerously-skip-permissions --continue --print '{user_msg or default_msg}'"
         else:
             default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
-        initial_message = user_msg or default_msg
-        if initial_message:
-            try:
-                container.exec_run(["/bin/sh", "-lc", f"echo '{initial_message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
-            except Exception:
-                pass
+            cmd = f"openclaw agent --message '{user_msg or default_msg}'"
+        try:
+            container.exec_run(["/bin/sh", "-lc", f"nohup {cmd} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+        except Exception:
+            pass
 
         return {
             "container_name": container.name,
@@ -449,9 +449,8 @@ def create_app(docker_client=None):
                 cmd = f"claude --dangerously-skip-permissions --continue --print '{message}'"
             else:
                 cmd = f"openclaw agent --message '{message}'"
-            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER, tty=True)
-            output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
-            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "output": output, "sent_at": now_iso()})
+            result = container.exec_run(["/bin/sh", "-lc", f"nohup {cmd} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
