@@ -223,10 +223,15 @@ def create_app(docker_client=None):
             log_config=log_config,
         )
 
-        # 创建容器后发送初始消息（可选）
+        # 创建容器后发送初始消息
         import time
         time.sleep(5)
-        initial_message = body.get("initial_message") or "严格遵循USER.md，8082web app的具体需求稍后再与你沟通"
+        user_msg = (body.get("message") or "").strip()
+        if agent_type == "claude":
+            default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+        else:
+            default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+        initial_message = user_msg or default_msg
         if initial_message:
             try:
                 container.exec_run(["/bin/sh", "-lc", f"echo '{initial_message}' > /tmp/initial_message.txt && sync"], user=AGENT_RUNTIME_USER)
