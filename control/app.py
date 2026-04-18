@@ -238,20 +238,22 @@ def create_app(docker_client=None):
         import time
         time.sleep(3)
         user_msg = (body.get("message") or "").strip()
+        msg_file = "/tmp/send_msg.sh"
         if agent_type == "claude":
             default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-            cmd = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+            script = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
         else:
             default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-            cmd = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
+            script = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
         try:
-            container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER, detach=True)
+            container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
+            container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
         except Exception:
             pass
 
@@ -464,14 +466,20 @@ def create_app(docker_client=None):
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
-            escaped_msg = message.replace("'", "'\"'\"'")
+            msg_file = "/tmp/send_msg.sh"
             if agent_type == "claude":
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
-                cmd = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+                escaped_msg = message.replace("'", "'\"'\"'")
+                script = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
             else:
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
-                cmd = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
-            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER, detach=True)
+                escaped_msg = message.replace("'", "'\"'\"'")
+                script = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
+            try:
+                container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
+                container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
             return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
