@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates sudo curl git \
+    && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g openclaw@2026.2.9

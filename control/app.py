@@ -244,7 +244,7 @@ def create_app(docker_client=None):
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-            script = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+            script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
         else:
             default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
@@ -470,11 +470,11 @@ def create_app(docker_client=None):
             if agent_type == "claude":
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 escaped_msg = message.replace("'", "'\"'\"'")
-                script = f"claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+                script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
             else:
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 escaped_msg = message.replace("'", "'\"'\"'")
-                script = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
+                script = f"stdbuf -o0 openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
             try:
                 container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
                 container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
