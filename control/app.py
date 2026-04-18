@@ -23,8 +23,8 @@ AGENT_SPECS = {
     "claude": {"image": "hermit-agent-claude:latest", "config_subdir": "claude"},
     "openclaw@2026.2.9": {"image": "hermit-agent-openclaw-2026.2.9:latest", "config_subdir": "openclaw"},
 }
-# Used in API handlers (line 259, 300, 310) as default line count shown in each 20-line card.
-DEFAULT_TAIL_LINES = 20
+# Used in API handlers (line 259, 300, 310) as default line count shown in each card.
+DEFAULT_TAIL_LINES = 200
 # Used in _safe_name_part (line 92) to sanitize user-provided agent names.
 NAME_SANITIZE_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
 # Used in create_agent (line 132) and api_command (line 247) so container startup and exec run as non-root agent user.
