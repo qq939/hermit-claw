@@ -252,6 +252,8 @@ def create_app(docker_client=None):
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
             script = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
         try:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
             container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
             container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
         except Exception:
@@ -440,42 +442,30 @@ def create_app(docker_client=None):
         except docker.errors.NotFound:
             return jsonify({"error": "Container not found"}), 404
 
-    @app.post("/api/agents/<path:name>/command")
-    def api_command(name):
-        body = request.get_json(silent=True) or {}
-        command = (body.get("command") or "").strip()
-        if not command:
-            return jsonify({"error": "command is required"}), 400
-        try:
-            container = _require_managed(name)
-            result = container.exec_run(["/bin/sh", "-lc", command], user=AGENT_RUNTIME_USER, tty=True)
-            output = result.output.decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
-            return jsonify({"container_name": name, "command": command, "exit_code": int(result.exit_code), "output": output, "executed_at": now_iso()})
-        except PermissionError as e:
-            return jsonify({"error": str(e)}), 403
-        except docker.errors.NotFound:
-            return jsonify({"error": "Container not found"}), 404
-
     @app.post("/api/agents/<path:name>/send-message")
     def api_send_message(name):
         body = request.get_json(silent=True) or {}
         message = (body.get("message") or "").strip()
-        if not message:
-            return jsonify({"error": "message is required"}), 400
         try:
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
             msg_file = "/tmp/send_msg.sh"
             if agent_type == "claude":
+                default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
-                escaped_msg = message.replace("'", "'\"'\"'")
+                msg_to_send = message or default_msg
+                escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
             else:
+                default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
-                escaped_msg = message.replace("'", "'\"'\"'")
+                msg_to_send = message or default_msg
+                escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 script = f"stdbuf -o0 openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
             try:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
                 container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
                 container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
             except Exception as e:
@@ -718,14 +708,10 @@ def create_app(docker_client=None):
             <button data-action="refresh">查看日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
+            <button data-action="init">发送初始消息</button>
           </div>
           <div class="cmd-bar">
-            <select class="cmd-mode" data-role="cmd-mode">
-              <option value="chat">对话</option>
-              <option value="shell">Shell</option>
-            </select>
-            <input class="cmd-input" data-role="cmd-input" placeholder="在卡片内输入命令并回车执行（默认 agent 用户）" />
-            <button data-action="exec">执行</button>
+            <input class="cmd-input" data-role="cmd-input" placeholder="输入对话内容并回车发送" style="flex:1;" />
           </div>
           <pre id="log-${{item.container_name}}">${{item.logs || ""}}</pre>
           </div>
@@ -738,7 +724,6 @@ def create_app(docker_client=None):
         }};
         const logBox = div.querySelector("pre");
         const cmdInput = div.querySelector('[data-role="cmd-input"]');
-        const cmdMode = div.querySelector('[data-role="cmd-mode"]');
         div.querySelector('button[data-action="refresh"]').onclick = async () => {{
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=${{tail}}`, {{ cache: "no-store" }});
           const d = await r.json();
@@ -758,98 +743,54 @@ def create_app(docker_client=None):
           logBox.textContent += `\\n(recreated) ${{d.container_name}}\\n`;
           await refreshCards();
         }};
-        if (item.agent_type === "claude" || item.agent_type === "openclaw@2026.2.9") {{
-          cmdMode.value = "shell";
-          cmdInput.placeholder = "输入对话内容，或输入 ls/pwd 等命令";
-        }} else {{
-          cmdMode.value = "shell";
-        }}
-
-        // 保存用户在执行过程中的历史命令/输出，避免轮询刷新覆盖
-        const cardKey = `card_state_${{item.container_name}}`;
+        div.querySelector('button[data-action="init"]').onclick = async () => {{
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/send-message`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ message: "" }}),
+          }});
+          if (!r.ok) {{
+            const d = await r.json();
+            logBox.textContent += `\\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
+            return;
+          }}
+          logBox.textContent += `\\n(已发送初始消息)\\n`;
+        }};
+        
+        const cardKey = `card_${{item.container_name}}`;
         if (!window.cardStates) window.cardStates = {{}};
         
-        const runCommand = async () => {{
-          const raw = (cmdInput.value || "").trim();
-          if (!raw) return;
-          const mode = cmdMode.value || "shell";
-          
-          let command = raw;
-          let execCmd = raw;
-          
-          // 如果用户只是输入聊天内容（而不是 shell 命令），我们自动帮他包装成 agent调用
-          if (item.agent_type === "claude") {{
-             // 如果输入不是以常见 shell 命令开头，认为是一句对话
-             if (!raw.match(/^(ls|cd|pwd|cat|echo|claude|rm|mkdir|touch)/)) {{
-                const escaped = raw.replaceAll('"', '\\"');
-                command = `claude --dangerously-skip-permissions --continue --print "${{escaped}}"`;
-                execCmd = `PAGER=cat claude --dangerously-skip-permissions --continue --print "${{escaped}}"`;
-             }} else if (raw.startsWith("claude")) {{
-                if (raw.trim() === "claude") {{
-                    command = `claude --dangerously-skip-permissions --continue -p ""`;
-                    execCmd = `PAGER=cat claude --dangerously-skip-permissions --continue -p ""`;
-                }} else {{
-                    command = raw;
-                    execCmd = `PAGER=cat ${{raw}}`;
-                }}
-             }}
-          }} else if (item.agent_type === "openclaw@2026.2.9") {{
-             if (!raw.match(/^(ls|cd|pwd|cat|echo|openclaw|rm|mkdir|touch)/)) {{
-                const escaped = raw.replaceAll('"', '\\"');
-                command = `openclaw agent --session-id "${{item.container_name}}" --json --message "${{escaped}}"`;
-                execCmd = command; // 显示并执行真实命令
-             }} else if (raw.startsWith("openclaw")) {{
-                command = raw;
-                execCmd = `PAGER=cat ${{raw}}`;
-             }}
-          }}
-
+        const formatTime = () => {{
+          const d = new Date();
+          return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0") + ":" + String(d.getSeconds()).padStart(2,"0");
+        }};
+        
+        const sendMessage = async () => {{
+          const msg = (cmdInput.value || "").trim();
+          if (!msg) return;
           if (!window.cardStates[item.container_name]) {{
              window.cardStates[item.container_name] = logBox.textContent;
           }}
-          window.cardStates[item.container_name] += `\\n$ ${{command}}\\n`;
-          logBox.textContent = window.cardStates[item.container_name];
-          logBox.scrollTop = logBox.scrollHeight;
-
-          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/command`, {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ command: execCmd }}),
-          }});
-          const d = await r.json();
-          if (!r.ok) {{
-            window.cardStates[item.container_name] += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
-          }} else {{
-            let outText = d.output || "(no output)";
-            
-            if (item.agent_type === "openclaw@2026.2.9") {{
-               if (execCmd.includes("--json")) {{
-                  try {{
-                     const j = JSON.parse(outText);
-                     if (j && j.result && j.result.payloads && j.result.payloads.length > 0) {{
-                         outText = j.result.payloads.map(p => p.text).join("\\n");
-                     }}
-                  }} catch(e){{}}
-               }}
-            }}
-            window.cardStates[item.container_name] += outText + "\\n";
-          }}
+          window.cardStates[item.container_name] += "\\n" + formatTime() + " $ " + msg + "\\n";
           logBox.textContent = window.cardStates[item.container_name];
           logBox.scrollTop = logBox.scrollHeight;
           cmdInput.value = "";
-        }};
-        const execBtn = div.querySelector('button[data-action="exec"]');
-        execBtn.onclick = runCommand;
-        cmdInput.addEventListener("keydown", (e) => {{
-          if (e.key === "Enter") {{
-            e.preventDefault();
-            runCommand();
+          
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/send-message`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ message: msg }}),
+          }});
+          if (!r.ok) {{
+            const d = await r.json();
+            window.cardStates[item.container_name] += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
           }}
-        }});
+          logBox.textContent = window.cardStates[item.container_name];
+          logBox.scrollTop = logBox.scrollHeight;
+        }};
+        cmdInput.addEventListener("keydown", (e) => {{ if (e.key === "Enter") sendMessage(); }});
         if (!managed) {{
           cmdInput.disabled = true;
-          execBtn.disabled = true;
-          cmdMode.disabled = true;
           cmdInput.placeholder = "该容器非18080创建（compose成员），默认只读显示";
           div.querySelector('button[data-action="recreate"]').disabled = true;
         }}
