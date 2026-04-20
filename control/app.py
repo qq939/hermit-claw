@@ -1,8 +1,8 @@
 # OpenClaw Gateway: 172.30.0.10:18790 (docker network: openclaw-network)
-INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。"
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
 import docker
@@ -101,7 +101,7 @@ def create_app(docker_client=None):
                 continue
             if is_compose_member(c) and c.name != "hermit-control-18080":
                 items.append(c)
-        return sorted(items, key=lambda c: c.name)
+        return sorted(items, key=lambda c: getattr(c, 'attrs', {}).get('Created', c.name))
 
     def container_host_port(container):
         bindings = ((getattr(container, "attrs", {}) or {}).get("HostConfig", {}) or {}).get("PortBindings", {}) or {}
@@ -244,23 +244,24 @@ def create_app(docker_client=None):
         user_msg = (body.get("message") or "").strip()
         msg_file = "/tmp/send_msg.sh"
         if agent_type == "claude":
-            default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+            default_msg = INITIAL_MESSAGE.format(agent="claude")
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-            script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+            msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
+            script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
         else:
             default_msg = INITIAL_MESSAGE.format(agent="openclaw")
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
             msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-            script = f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
+            script = f"node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; const j=JSON.parse(fs.readFileSync(p,\"utf8\")); delete j.gateway.bind; delete j.gateway.mode; fs.writeFileSync(p,JSON.stringify(j));'; echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
         try:
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
             container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
             container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
-            container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+            container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
         except Exception:
             pass
 
@@ -457,23 +458,24 @@ def create_app(docker_client=None):
             agent_type = labels.get("hermit.agent_type", "")
             msg_file = "/tmp/send_msg.sh"
             if agent_type == "claude":
-                default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.claude/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+                default_msg = INITIAL_MESSAGE.format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-                script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
+                msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
+                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
             else:
-                default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+                default_msg = INITIAL_MESSAGE.format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
+                script = f"node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; const j=JSON.parse(fs.readFileSync(p,\"utf8\")); delete j.gateway.bind; delete j.gateway.mode; fs.writeFileSync(p,JSON.stringify(j));'; echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
             try:
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
                 container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
                 container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
-                container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >/dev/null 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+                container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
             return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})

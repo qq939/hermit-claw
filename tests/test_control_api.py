@@ -123,6 +123,7 @@ class ControlApiTests(unittest.TestCase):
         self.assertEqual(lines[1].strip().startswith("INITIAL_MESSAGE = "), True)
         self.assertIn("{agent}", lines[1])
         self.assertIn("8082", lines[1])
+        self.assertIn("start.sh", lines[1])
 
     def test_create_agent_should_increment_port_and_name(self):
         resp = self.client.post("/api/agents", json={"type": "claude", "name": "writer"})
@@ -187,6 +188,18 @@ class ControlApiTests(unittest.TestCase):
         self.assertIn("/logs?tail=", content)
         self.assertIn("logData.logs", content)
         self.assertIn("window.cardStates[item.container_name]", content)
+
+    def test_openclaw_agent_no_fallback_to_embedded(self):
+        with open("agents/openclaw/Dockerfile", "r") as f:
+            content = f.read()
+        self.assertIn("delete j.gateway.bind", content)
+        self.assertIn("openclaw tui", content)
+
+    def test_agent_script_writes_to_log(self):
+        with open("control/app.py", "r") as f:
+            content = f.read()
+        self.assertIn(">> '{log_path}'", content)
+        self.assertIn("openclaw agent", content)
 
 
 if __name__ == "__main__":

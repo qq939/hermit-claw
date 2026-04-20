@@ -10,8 +10,43 @@ RUN useradd -m -s /bin/bash agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 0440 /etc/sudoers.d/agent
 
+RUN mkdir -p /home/agent/.openclaw/workspace/project/logs \
+    && printf '#!/bin/bash\ncd /home/agent/.openclaw/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n' > /home/agent/.openclaw/workspace/project/start.sh \
+    && chmod +x /home/agent/.openclaw/workspace/project/start.sh
+
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
 EXPOSE 8082
 
-CMD ["/bin/sh", "-lc", "mkdir -p \"$HOME/.openclaw\"; if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.openclaw/\"; fi; mkdir -p /home/agent/.openclaw/workspace/project/logs; export GATEWAY_HOST=\"${OPENCLAW_GATEWAY_HOST:-172.30.0.10}\"; export GATEWAY_PORT=\"${OPENCLAW_GATEWAY_PORT:-18790}\"; export GATEWAY_TOKEN=\"${OPENCLAW_GATEWAY_TOKEN:-}\"; node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; if(fs.existsSync(p)){ const j=JSON.parse(fs.readFileSync(p,\"utf8\")); if(j.agents && j.agents.defaults){ j.agents.defaults.workspace=\"/home/agent/.openclaw/workspace/project\"; } j.gateway = j.gateway || {}; j.gateway.port = 18790; j.gateway.auth = j.gateway.auth || {}; j.gateway.remote = j.gateway.remote || {}; j.gateway.remote.url = \"ws://\" + process.env.GATEWAY_HOST + \":\" + process.env.GATEWAY_PORT; if(j.gateway.auth.token){ j.gateway.remote.token = j.gateway.auth.token; } fs.writeFileSync(p, JSON.stringify(j, null, 2)); }'; exec openclaw tui --url \"ws://$GATEWAY_HOST:$GATEWAY_PORT\" --token \"$GATEWAY_TOKEN\""]
+CMD ["/bin/sh", "-lc", " \
+    mkdir -p \"$HOME/.openclaw\"; \
+    if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.openclaw/\"; fi; \
+    mkdir -p /home/agent/.openclaw/workspace/project/logs; \
+    node -e ' \
+        const fs=require(\"fs\"); \
+        const gh=process.env.OPENCLAW_GATEWAY_HOST||\"172.30.0.10\"; \
+        const gp=process.env.OPENCLAW_GATEWAY_PORT||\"18790\"; \
+        const p=process.env.HOME+\"/.openclaw/openclaw.json\"; \
+        if(fs.existsSync(p)){ \
+            const j=JSON.parse(fs.readFileSync(p,\"utf8\")); \
+            if(j.agents && j.agents.defaults){ \
+                j.agents.defaults.workspace=\"/home/agent/.openclaw/workspace/project\"; \
+            } \
+            j.gateway = j.gateway || {}; \
+            j.gateway.port = 18790; \
+            j.gateway.auth = j.gateway.auth || {}; \
+            j.gateway.remote = j.gateway.remote || {}; \
+            j.gateway.remote.url = \"ws://\" + gh + \":\" + gp; \
+            if(j.gateway.auth.token){ \
+                j.gateway.remote.token = j.gateway.auth.token; \
+            } \
+            delete j.gateway.bind; \
+            delete j.gateway.mode; \
+            fs.writeFileSync(p, JSON.stringify(j, null, 2)); \
+        } \
+    '; \
+    if [ -f /home/agent/.openclaw/workspace/project/start.sh ] && [ -s /home/agent/.openclaw/workspace/project/start.sh ]; then \
+        chmod +x /home/agent/.openclaw/workspace/project/start.sh; \
+        nohup bash /home/agent/.openclaw/workspace/project/start.sh >> /home/agent/.openclaw/workspace/project/logs/start.log 2>&1 & \
+    fi; \
+    exec openclaw tui --url \"ws://$OPENCLAW_GATEWAY_HOST:$OPENCLAW_GATEWAY_PORT\" --token \"$OPENCLAW_GATEWAY_TOKEN\""]
