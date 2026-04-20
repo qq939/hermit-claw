@@ -1,3 +1,5 @@
+# OpenClaw Gateway: 172.30.0.10:18790 (docker network: openclaw-network)
+INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
 import os
 import re
 from datetime import datetime, timezone
@@ -29,7 +31,6 @@ DEFAULT_TAIL_LINES = 200
 NAME_SANITIZE_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
 # Used in create_agent (line 132) and api_command (line 247) so container startup and exec run as non-root agent user.
 AGENT_RUNTIME_USER = "agent"
-#
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
 HOST_CONFIG_ROOT_ENV = "HOST_CONFIG_ROOT"
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
@@ -218,6 +219,8 @@ def create_app(docker_client=None):
                             env_vars["OPENCLAW_GATEWAY_TOKEN"] = str(token)
                 except Exception:
                     pass
+            env_vars["OPENCLAW_GATEWAY_HOST"] = "172.30.0.10"
+            env_vars["OPENCLAW_GATEWAY_PORT"] = "18790"
 
         container = docker_client_or_default().containers.run(
             spec["image"],
@@ -232,6 +235,7 @@ def create_app(docker_client=None):
             volumes=volumes,
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
+            network="hermit-claw_openclaw-network",
         )
 
         # 创建容器后发送初始消息
@@ -246,11 +250,12 @@ def create_app(docker_client=None):
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
             script = f"stdbuf -o0 claude --dangerously-skip-permissions --continue --print '{escaped_msg}' >> '{log_path}' 2>&1"
         else:
-            default_msg = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.openclaw/workspace/project，如果project文件夹有web app，请启动web app，并且随时维护不要让它关闭服务。如果project文件夹内没有web app，那在后续沟通时候会给你提需求。"
+            default_msg = INITIAL_MESSAGE.format(agent="openclaw")
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-            script = f"openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
+            msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
+            script = f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
         try:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
@@ -365,7 +370,7 @@ def create_app(docker_client=None):
             "host_port": port,
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
-            "logs": _tail_logs(container, tail=tail),
+            "logs": _tail_logs(container, tail=50),
         }
         return item
 
@@ -462,7 +467,8 @@ def create_app(docker_client=None):
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-                script = f"stdbuf -o0 openclaw agent --message '{escaped_msg}' >> '{log_path}' 2>&1"
+                msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
+                script = f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
             try:
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
@@ -711,7 +717,8 @@ def create_app(docker_client=None):
             <button data-action="init">发送初始消息</button>
           </div>
           <div class="cmd-bar">
-            <input class="cmd-input" data-role="cmd-input" placeholder="输入对话内容并回车发送" style="flex:1;" />
+            <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
+            <button data-action="send">发送</button>
           </div>
           <pre id="log-${{item.container_name}}">${{item.logs || ""}}</pre>
           </div>
@@ -754,8 +761,9 @@ def create_app(docker_client=None):
             logBox.textContent += `\\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
             return;
           }}
-          logBox.textContent += `\\n(已发送初始消息)\\n`;
+          logBox.textContent += `\n(已发送初始消息)\n`;
         }};
+        div.querySelector('button[data-action="send"]').onclick = () => sendMessage();
         
         const cardKey = `card_${{item.container_name}}`;
         if (!window.cardStates) window.cardStates = {{}};
@@ -768,9 +776,7 @@ def create_app(docker_client=None):
         const sendMessage = async () => {{
           const msg = (cmdInput.value || "").trim();
           if (!msg) return;
-          if (!window.cardStates[item.container_name]) {{
-             window.cardStates[item.container_name] = logBox.textContent;
-          }}
+          window.cardStates[item.container_name] = logBox.textContent;
           window.cardStates[item.container_name] += "\\n" + formatTime() + " $ " + msg + "\\n";
           logBox.textContent = window.cardStates[item.container_name];
           logBox.scrollTop = logBox.scrollHeight;
@@ -787,8 +793,18 @@ def create_app(docker_client=None):
           }}
           logBox.textContent = window.cardStates[item.container_name];
           logBox.scrollTop = logBox.scrollHeight;
+          
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const logResp = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=500`, {{ cache: "no-store" }});
+          if (logResp.ok) {{
+            const logData = await logResp.json();
+            if (logData.logs) {{
+              window.cardStates[item.container_name] = logData.logs;
+              logBox.textContent = window.cardStates[item.container_name];
+              logBox.scrollTop = logBox.scrollHeight;
+            }}
+          }}
         }};
-        cmdInput.addEventListener("keydown", (e) => {{ if (e.key === "Enter") sendMessage(); }});
         if (!managed) {{
           cmdInput.disabled = true;
           cmdInput.placeholder = "该容器非18080创建（compose成员），默认只读显示";
