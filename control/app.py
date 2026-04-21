@@ -371,7 +371,7 @@ def create_app(docker_client=None):
             "host_port": port,
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
-            "logs": _tail_logs(container, tail=50),
+            "logs": _tail_logs(container, tail=200),
         }
         return item
 
