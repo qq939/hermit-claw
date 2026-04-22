@@ -6,9 +6,6 @@ RUN apt-get update \
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
-COPY run_claude.js /home/agent/.claude/run_claude.js
-RUN chmod +x /home/agent/.claude/run_claude.js
-
 RUN useradd -m -s /bin/bash agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 0440 /etc/sudoers.d/agent \
@@ -16,6 +13,8 @@ RUN useradd -m -s /bin/bash agent \
     && printf '%s\n' '{"hasCompletedOnboarding": true, "hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true}' > /home/agent/.claude.json \
     && chown -R agent:agent /home/agent/.claude /home/agent/.claude.json \
     && mkdir -p /home/agent/.claude/workspace/project/logs \
+    && printf 'const { spawn } = require("child_process"); const child = spawn("claude", ["--dangerously-skip-permissions", "--continue", "--print"], { stdio: ["pipe", "inherit", "inherit"], shell: true, env: { ...process.env, ANTHROPIC_DISABLE_PREFLIGHT: "1" } }); child.stdin.end(Buffer.from(process.env.CLAUDE_MSG, "base64").toString("utf8"));\n' > /home/agent/.claude/run_claude.js \
+    && chmod +x /home/agent/.claude/run_claude.js \
     && printf '#!/bin/bash\ncd /home/agent/.claude/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n' > /home/agent/.claude/workspace/project/start.sh \
     && chmod +x /home/agent/.claude/workspace/project/start.sh
 
