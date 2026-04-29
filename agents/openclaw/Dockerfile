@@ -1,9 +1,10 @@
 FROM node:22-bookworm-slim
 
-RUN for i in 1 2 3 4 5; do \
-        apt-get update && break || { apt-get update; } \
-    done \
-    && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server \
+RUN apt-get update \
+    || (sleep 5 && apt-get update) \
+    || (sleep 10 && apt-get update) \
+    && apt-get install -y --no-install-recommends --fix-missing ca-certificates sudo curl git coreutils openssh-server \
+    || apt-get install -y --no-install-recommends --fix-missing ca-certificates sudo curl git coreutils openssh-server \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/run/sshd \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
@@ -20,7 +21,9 @@ RUN for i in 1 2 3 4 5; do \
     && chown -R 501:20 /etc/ssh/ssh_host_*_key \
     && chmod 0600 /etc/ssh/ssh_host_*_key
 
-RUN npm install -g openclaw@2026.2.9
+RUN npm install -g openclaw@2026.2.9 \
+    || (sleep 10 && npm install -g openclaw@2026.2.9) \
+    || (sleep 30 && npm install -g openclaw@2026.2.9)
 
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
