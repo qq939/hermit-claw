@@ -1,5 +1,4 @@
-# OpenClaw Gateway: 172.30.0.10:18790 (docker network: openclaw-network)
-INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。"
+INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。最后完善readme和SKILL.md文件。"
 import os
 import re
 from datetime import datetime, timezone, timedelta
