@@ -8,6 +8,7 @@ from io import BytesIO
 import docker
 from docker.types import LogConfig
 from flask import Flask, jsonify, make_response, request, send_file
+from flask_sock import Sock
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
@@ -43,6 +44,7 @@ def now_iso():
 
 def create_app(docker_client=None):
     app = Flask(__name__)
+    sock = Sock(app)
     app.config["DOCKER_CLIENT"] = docker_client
     app.config["CONFIG_ROOT"] = "/config"
     app.config["WORKSPACES_ROOT"] = "/workspaces"
@@ -236,6 +238,7 @@ def create_app(docker_client=None):
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
             network="hermit-claw_openclaw-network",
+            extra_hosts=["host.docker.internal:host-gateway"],
         )
 
         # 创建容器后发送初始消息
@@ -347,12 +350,12 @@ def create_app(docker_client=None):
                 "hermit.host_port": str(host_port),
                 "hermit.service_port": str(SERVICE_PORT),
             },
-            ports={f"{SERVICE_PORT}/tcp": host_port},
+            ports={f"{SERVICE_PORT}/tcp": host_port, "22/tcp": host_port - 10000},
             volumes=volumes,
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
         )
-        return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
+        return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
     def format_item(container, tail):
         port = container_host_port(container)
@@ -369,11 +372,165 @@ def create_app(docker_client=None):
             "agent_type": agent_type,
             "status": getattr(container, "status", "unknown"),
             "host_port": port,
+            "ssh_port": port - 10000 if port else None,
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
             "logs": _tail_logs(container, tail=200),
         }
         return item
+
+    @app.get("/api/agents/<path:name>/ssh-info")
+    def api_agent_ssh_info(name):
+        try:
+            container = docker_client_or_default().containers.get(name)
+            return jsonify({
+                "host": "localhost",
+                "port": 22,
+                "user": "agent",
+                "password": "agent",
+                "container": container.name,
+            })
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+
+    @app.get("/api/agents/<path:name>/ssh-terminal")
+    def api_agent_ssh_terminal(name):
+        try:
+            container = docker_client_or_default().containers.get(name)
+            container_name = container.name
+            html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Terminal - {name}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <style>
+    body {{ margin: 0; padding: 4px; background: #1e1e1e; overflow: hidden; }}
+    #terminal {{ width: 100%; height: 100vh; }}
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script>
+    const term = new Terminal({{ cursorBlink: true, fontSize: 14, fontFamily: 'Menlo, Monaco, "Courier New", monospace' }});
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = wsProtocol + '//' + location.host + '/ws/ssh?container={container_name}';
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {{
+      term.write('\\x1b[32mConnected to {container_name} via SSH\\x1b[0m\\r\\n');
+      term.onData(data => ws.send(data));
+    }};
+
+    ws.onmessage = (event) => {{
+      term.write(event.data);
+    }};
+
+    ws.onclose = () => {{
+      term.write('\\r\\n\\x1b[31m[Connection Closed]\\x1b[0m\\r\\n');
+    }};
+
+    ws.onerror = (err) => {{
+      term.write('\\r\\n\\x1b[31m[WebSocket Error]\\x1b[0m\\r\\n');
+    }};
+
+    window.addEventListener('resize', () => fitAddon.fit());
+  </script>
+</body>
+</html>"""
+            return html, 200, {"Content-Type": "text/html"}
+        except docker.errors.NotFound:
+            return "Container not found", 404
+
+    @sock.route("/ws/ssh")
+    def ws_ssh(ws):
+        import threading
+        container_name = request.args.get("container")
+        if not container_name:
+            ws.close()
+            return
+
+        try:
+            import paramiko
+        except ImportError:
+            ws.send("paramiko not installed\r\n")
+            ws.close()
+            return
+
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            ssh.connect(
+                hostname=container_name,
+                port=22,
+                username="agent",
+                password="agent",
+                timeout=10,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+            transport = ssh.get_transport()
+            if not transport:
+                ws.close()
+                return
+            transport.set_keepalive(10)
+
+            chan = ssh.invoke_shell(term="xterm-256color", width=80, height=24)
+            chan.settimeout(0.1)
+
+            def pump():
+                try:
+                    while True:
+                        if chan.exit_status_ready():
+                            break
+                        try:
+                            data = chan.recv(65536)
+                            if data:
+                                ws.send(data.decode('utf-8', errors='replace'))
+                            else:
+                                break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        chan.close()
+                    except Exception:
+                        pass
+                    ws.close()
+                    ssh.close()
+
+            t = threading.Thread(target=pump, daemon=True)
+            t.start()
+
+            while True:
+                try:
+                    msg = ws.receive(timeout=0.05)
+                    if msg:
+                        chan.send(msg)
+                except Exception:
+                    break
+
+        except Exception as e:
+            try:
+                ws.send(f"\r\n[SSH Error: {e}]\r\n")
+            except Exception:
+                pass
+            ws.close()
+        finally:
+            try:
+                ssh.close()
+            except Exception:
+                pass
 
     @app.get("/api/agent-types")
     def api_agent_types():
@@ -700,20 +857,22 @@ def create_app(docker_client=None):
         div.dataset.name = item.container_name;
         const stCls = item.status === "running" ? "status-running" : "status-other";
         const managed = !!item.managed;
+        const sshPort = item.ssh_port;
         div.innerHTML = `
           <div class="card-head">
             <div style="display:flex;align-items:center;gap:8px;">
               <button class="collapse-btn" data-action="collapse">▶</button>
               <div>
                 <div>${{item.container_name}}</div>
-                <div class="meta">${{item.agent_type}} · ${{item.host_port}}:${SERVICE_PORT}</div>
+                <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
             </div>
             <div class="meta ${{stCls}}">${{item.status}}</div>
           </div>
           <div class="card-body">
           <div class="actions">
-            <button data-action="refresh">查看日志</button>
+            <button data-action="ssh">SSH终端</button>
+            <button data-action="refresh">刷新日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
             <button data-action="init">发送初始消息</button>
@@ -722,7 +881,8 @@ def create_app(docker_client=None):
             <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
             <button data-action="send">发送</button>
           </div>
-          <pre id="log-${{item.container_name}}">${{item.logs || ""}}</pre>
+          <pre id="log-${{item.container_name}}" class="log-view">${{item.logs || ""}}</pre>
+          <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:400px; border:1px solid #ccc;" src=""></iframe>
           </div>
         `;
         const collapseBtn = div.querySelector('.collapse-btn');
@@ -732,7 +892,24 @@ def create_app(docker_client=None):
           collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
         }};
         const logBox = div.querySelector("pre");
+        const sshIframe = div.querySelector("iframe");
+        const sshBtn = div.querySelector('button[data-action="ssh"]');
         const cmdInput = div.querySelector('[data-role="cmd-input"]');
+        let sshActive = false;
+        sshBtn.onclick = () => {{
+          sshActive = !sshActive;
+          sshBtn.style.fontWeight = sshActive ? "bold" : "";
+          sshBtn.style.background = sshActive ? "#4caf50" : "";
+          if (sshActive) {{
+            sshIframe.src = `/api/agents/${{encodeURIComponent(item.container_name)}}/ssh-terminal`;
+            logBox.style.display = "none";
+            sshIframe.style.display = "block";
+          }} else {{
+            sshIframe.src = "";
+            sshIframe.style.display = "none";
+            logBox.style.display = "block";
+          }}
+        }};
         div.querySelector('button[data-action="refresh"]').onclick = async () => {{
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=${{tail}}`, {{ cache: "no-store" }});
           const d = await r.json();

@@ -1,18 +1,28 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir /var/run/sshd \
+    && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config \
+    && ssh-keygen -A \
+    && chown agent:agent /etc/ssh/ssh_host_*_key \
+    && chmod 0600 /etc/ssh/ssh_host_*_key
 
 RUN npm install -g openclaw@2026.2.9
 
-RUN useradd -m -s /bin/bash agent \
+RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
+    && echo "agent:agent" | chpasswd \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
-    && chmod 0440 /etc/sudoers.d/agent
-
-RUN mkdir -p /home/agent/.openclaw/workspace/project/logs \
+    && chmod 0440 /etc/sudoers.d/agent \
+    && mkdir -p /home/agent/.openclaw/workspace/project/logs \
     && printf '#!/bin/bash\ncd /home/agent/.openclaw/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n' > /home/agent/.openclaw/workspace/project/start.sh \
-    && chmod +x /home/agent/.openclaw/workspace/project/start.sh
+    && chmod +x /home/agent/.openclaw/workspace/project/start.sh \
+    && ssh-keygen -A \
+    && chown -R 501:20 /etc/ssh/ssh_host_*_key \
+    && chmod 0600 /etc/ssh/ssh_host_*_key
 
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
@@ -22,6 +32,7 @@ CMD ["/bin/sh", "-lc", " \
     mkdir -p \"$HOME/.openclaw\"; \
     if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.openclaw/\"; fi; \
     mkdir -p /home/agent/.openclaw/workspace/project/logs; \
+    /usr/sbin/sshd; \
     node -e ' \
         const fs=require(\"fs\"); \
         const gh=process.env.OPENCLAW_GATEWAY_HOST||\"172.30.0.10\"; \

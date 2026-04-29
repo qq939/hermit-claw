@@ -62,3 +62,18 @@ services:
     image: hermit-agent-openclaw-2026.2.9:latest
     profiles: ["templates"]
     command: ["sleep", "infinity"]
+
+  ssh-gateway:
+    build:
+      context: ./agents/ssh-gateway
+      dockerfile: Dockerfile
+    container_name: hermit-ssh-gateway
+    restart: unless-stopped
+    ports:
+      - "18800:8080"
+    environment:
+      - DOCKER_HOST=host.docker.internal
+      - SSH_USER=agent
+      - SSH_PASS=agent
+    networks:
+      - openclaw-network
