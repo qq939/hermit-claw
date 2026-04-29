@@ -1,29 +1,35 @@
 FROM node:22-bookworm-slim
 
-RUN apt-get update \
-    || (sleep 5 && apt-get update) \
-    || (sleep 10 && apt-get update) \
-    && apt-get install -y --no-install-recommends --fix-missing ca-certificates sudo curl git coreutils openssh-server \
-    || apt-get install -y --no-install-recommends --fix-missing ca-certificates sudo curl git coreutils openssh-server \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir /var/run/sshd \
-    && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
-    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config \
-    && sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config \
-    && useradd -m -s /bin/bash -u 501 -g 20 agent \
-    && echo "agent:agent" | chpasswd \
-    && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
-    && chmod 0440 /etc/sudoers.d/agent \
-    && mkdir -p /home/agent/.openclaw/workspace/project/logs \
-    && printf '#!/bin/bash\ncd /home/agent/.openclaw/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n' > /home/agent/.openclaw/workspace/project/start.sh \
-    && chmod +x /home/agent/.openclaw/workspace/project/start.sh \
-    && ssh-keygen -A \
-    && chown -R 501:20 /etc/ssh/ssh_host_*_key \
-    && chmod 0600 /etc/ssh/ssh_host_*_key
+RUN bash -c ' \
+    for attempt in 1 2 3; do \
+        set +e; \
+        apt-get update && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server && break; \
+        sleep 10; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /var/run/sshd; \
+    sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin no/" /etc/ssh/sshd_config; \
+    sed -i "s/#PasswordAuthentication yes/PasswordAuthentication yes/" /etc/ssh/sshd_config; \
+    sed -i "s/#PermitEmptyPasswords no/PermitEmptyPasswords no/" /etc/ssh/sshd_config; \
+    useradd -m -s /bin/bash -u 501 -g 20 agent; \
+    echo "agent:agent" | chpasswd; \
+    echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent; \
+    chmod 0440 /etc/sudoers.d/agent; \
+    mkdir -p /home/agent/.openclaw/workspace/project/logs; \
+    printf "#!/bin/bash\ncd /home/agent/.openclaw/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n" > /home/agent/.openclaw/workspace/project/start.sh; \
+    chmod +x /home/agent/.openclaw/workspace/project/start.sh; \
+    ssh-keygen -A; \
+    chown -R 501:20 /etc/ssh/ssh_host_*_key; \
+    chmod 0600 /etc/ssh/ssh_host_*_key \
+'
 
-RUN npm install -g openclaw@2026.2.9 \
-    || (sleep 10 && npm install -g openclaw@2026.2.9) \
-    || (sleep 30 && npm install -g openclaw@2026.2.9)
+RUN bash -c ' \
+    for attempt in 1 2 3; do \
+        set +e; \
+        npm install -g openclaw@2026.2.9 && break; \
+        sleep 15; \
+    done \
+'
 
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
