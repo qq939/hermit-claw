@@ -303,6 +303,11 @@ def create_app(docker_client=None):
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)
 
+        try:
+            docker_client_or_default().images.pull(spec["image"])
+        except Exception:
+            pass
+
         env_vars = {}
         if agent_type == "claude":
             # 读取 claude 的 settings.json，把 env 字段注入到容器环境变量中
@@ -350,10 +355,12 @@ def create_app(docker_client=None):
                 "hermit.host_port": str(host_port),
                 "hermit.service_port": str(SERVICE_PORT),
             },
-            ports={f"{SERVICE_PORT}/tcp": host_port, "22/tcp": host_port - 10000},
+            ports={f"{SERVICE_PORT}/tcp": host_port},
             volumes=volumes,
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
+            network="hermit-claw_openclaw-network",
+            extra_hosts=["host.docker.internal:host-gateway"],
         )
         return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
