@@ -1,19 +1,15 @@
 FROM node:22-bookworm-slim
 
-RUN apt-get update \
+RUN for i in 1 2 3 4 5; do \
+        apt-get update && break || { apt-get update; } \
+    done \
     && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/run/sshd \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config \
-    && ssh-keygen -A \
-    && chown agent:agent /etc/ssh/ssh_host_*_key \
-    && chmod 0600 /etc/ssh/ssh_host_*_key
-
-RUN npm install -g openclaw@2026.2.9
-
-RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
+    && useradd -m -s /bin/bash -u 501 -g 20 agent \
     && echo "agent:agent" | chpasswd \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 0440 /etc/sudoers.d/agent \
@@ -23,6 +19,8 @@ RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && ssh-keygen -A \
     && chown -R 501:20 /etc/ssh/ssh_host_*_key \
     && chmod 0600 /etc/ssh/ssh_host_*_key
+
+RUN npm install -g openclaw@2026.2.9
 
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project

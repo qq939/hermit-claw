@@ -1,6 +1,8 @@
 FROM node:20-bookworm-slim
 
-RUN apt-get update \
+RUN for i in 1 2 3 4 5; do \
+        apt-get update && break || { rm -rf /var/lib/apt/lists/*; apt-get update; } \
+    done \
     && apt-get install -y --no-install-recommends ca-certificates sudo coreutils openssh-server \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/run/sshd \
