@@ -144,6 +144,21 @@ def create_app(docker_client=None):
         except Exception:
             return ""
 
+    def _full_logs(container):
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type", "")
+        if agent_type == "claude":
+            log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
+        else:
+            log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
+        try:
+            result = container.exec_run(["/bin/sh", "-lc", f"cat '{log_path}' 2>/dev/null"], user=AGENT_RUNTIME_USER)
+            if isinstance(result.output, bytes):
+                return result.output.decode("utf-8", errors="replace")
+            return str(result.output)
+        except Exception:
+            return ""
+
     def create_agent(agent_type, custom_name, body=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
@@ -593,13 +608,8 @@ def create_app(docker_client=None):
     @app.get("/api/agents/<path:name>/logs/download")
     def api_logs_download(name):
         try:
-            tail = int(request.args.get("tail", DEFAULT_TAIL_LINES))
-        except ValueError:
-            tail = DEFAULT_TAIL_LINES
-        tail = max(1, min(5000, tail))
-        try:
             container = _require_managed(name)
-            data = _tail_logs(container, tail=tail).encode("utf-8")
+            data = _full_logs(container).encode("utf-8")
             return send_file(
                 BytesIO(data),
                 mimetype="text/plain; charset=utf-8",
