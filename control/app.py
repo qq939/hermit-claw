@@ -102,7 +102,7 @@ def create_app(docker_client=None):
                 continue
             if is_compose_member(c) and c.name != "hermit-control-18080":
                 items.append(c)
-        return sorted(items, key=lambda c: getattr(c, 'attrs', {}).get('Created', c.name))
+        return sorted(items, key=lambda c: c.name)
 
     def container_host_port(container):
         bindings = ((getattr(container, "attrs", {}) or {}).get("HostConfig", {}) or {}).get("PortBindings", {}) or {}
