@@ -23,6 +23,7 @@ MANAGED_LABEL_VALUE = "true"
 # Used in create_agent (line 127, 144) and validation to map UI type to image/config directory.
 AGENT_SPECS = {
     "claude": {"image": "hermit-agent-claude:latest", "config_subdir": "claude"},
+    "ollama": {"image": "hermit-agent-ollama:latest", "config_subdir": "ollama"},
     "openclaw@2026.2.9": {"image": "hermit-agent-openclaw-2026.2.9:latest", "config_subdir": "openclaw"},
 }
 # Used in API handlers (line 259, 300, 310) as default line count shown in each card.
@@ -132,7 +133,7 @@ def create_app(docker_client=None):
     def _tail_logs(container, tail):
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type", "")
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
         else:
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
@@ -147,7 +148,7 @@ def create_app(docker_client=None):
     def _full_logs(container):
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type", "")
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
         else:
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
@@ -178,7 +179,7 @@ def create_app(docker_client=None):
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
             log_bind = "/home/agent/.openclaw/workspace/project/logs"
@@ -190,7 +191,7 @@ def create_app(docker_client=None):
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
         env_vars = {}
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             # 读取 claude 的 settings.json，把 env 字段注入到容器环境变量中
             # 注意：使用 CONFIG_ROOT (= /config) 因为这是容器内的挂载路径
             config_root = app.config["CONFIG_ROOT"]
@@ -260,7 +261,7 @@ def create_app(docker_client=None):
         time.sleep(3)
         user_msg = (body.get("message") or "").strip()
         msg_file = "/tmp/send_msg.sh"
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             default_msg = INITIAL_MESSAGE.format(agent="claude")
             log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
             msg_to_send = user_msg or default_msg
@@ -305,7 +306,7 @@ def create_app(docker_client=None):
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
             log_bind = "/home/agent/.openclaw/workspace/project/logs"
@@ -323,7 +324,7 @@ def create_app(docker_client=None):
             pass
 
         env_vars = {}
-        if agent_type == "claude":
+        if agent_type in ("claude", "ollama"):
             # 读取 claude 的 settings.json，把 env 字段注入到容器环境变量中
             # 注意：使用 CONFIG_ROOT (= /config) 因为这是容器内的挂载路径
             config_root = app.config["CONFIG_ROOT"]
@@ -630,7 +631,7 @@ def create_app(docker_client=None):
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
             msg_file = "/tmp/send_msg.sh"
-            if agent_type == "claude":
+            if agent_type in ("claude", "ollama"):
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg

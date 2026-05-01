@@ -63,6 +63,14 @@ services:
     profiles: ["templates"]
     command: ["sleep", "infinity"]
 
+  agent-image-ollama:
+    build:
+      context: .
+      dockerfile: agents/ollama/Dockerfile
+    image: hermit-agent-ollama:latest
+    profiles: ["templates"]
+    command: ["sleep", "infinity"]
+
   ssh-gateway:
     build:
       context: ./agents/ssh-gateway
