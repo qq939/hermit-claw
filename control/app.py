@@ -1,6 +1,7 @@
 INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。最后完善readme和SKILL.md文件，并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。"
 import os
 import re
+import sys
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -130,12 +131,19 @@ def create_app(docker_client=None):
             with open(FRPC_CONFIG_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
             if f"[{section}]" in content:
+                print(f"[frpc] port {port} already configured, skipping", flush=True, file=sys.stderr)
                 return
             with open(FRPC_CONFIG_PATH, "a", encoding="utf-8") as f:
                 f.write(entry)
-            os.system("docker restart frpc")
-        except Exception:
-            pass
+            print(f"[frpc] added rule for port {port}, restarting frpc via docker-py...", flush=True, file=sys.stderr)
+            try:
+                client = docker_client_or_default()
+                client.containers.get("frpc").restart()
+                print(f"[frpc] frpc restarted successfully", flush=True, file=sys.stderr)
+            except Exception as re:
+                print(f"[frpc] WARNING: docker restart frpc failed: {re}", flush=True, file=sys.stderr)
+        except Exception as e:
+            print(f"[frpc] ERROR: {e}", flush=True, file=sys.stderr)
 
     def find_next_port():
         used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
