@@ -115,6 +115,28 @@ def create_app(docker_client=None):
         except (TypeError, ValueError, AttributeError):
             return None
 
+    FRPC_CONFIG_PATH = "/Users/jiang/Downloads/frpc/frpc.ini"
+
+    def add_frpc_rule(port):
+        section = f"mac{port}"
+        entry = (
+            f"\n[{section}]\n"
+            f"type = tcp\n"
+            f"local_ip = 0.0.0.0\n"
+            f"local_port = {port}\n"
+            f"remote_port = {port}\n"
+        )
+        try:
+            with open(FRPC_CONFIG_PATH, "r", encoding="utf-8") as f:
+                content = f.read()
+            if f"[{section}]" in content:
+                return
+            with open(FRPC_CONFIG_PATH, "a", encoding="utf-8") as f:
+                f.write(entry)
+            os.system("docker restart frpc")
+        except Exception:
+            pass
+
     def find_next_port():
         used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
         for port in range(START_HOST_PORT, END_HOST_PORT + 1):
@@ -575,6 +597,7 @@ def create_app(docker_client=None):
         name = body.get("name") or ""
         try:
             payload = create_agent(agent_type, name, body)
+            add_frpc_rule(payload["host_port"])
             return jsonify(payload), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -680,6 +703,7 @@ def create_app(docker_client=None):
             if not is_managed(container):
                 return jsonify({"error": "Only managed agents can be recreated"}), 400
             payload = recreate_agent(name)
+            add_frpc_rule(payload["host_port"])
             return jsonify(payload)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -708,7 +732,9 @@ def create_app(docker_client=None):
         errors = {}
         for c in managed_containers():
             try:
-                recreated.append(recreate_agent(c.name))
+                payload = recreate_agent(c.name)
+                add_frpc_rule(payload["host_port"])
+                recreated.append(payload)
             except Exception as e:
                 errors[c.name] = str(e)
         return jsonify({"ok": True, "recreated": recreated, "errors": errors, "recreated_at": now_iso()})
