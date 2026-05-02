@@ -910,7 +910,7 @@ def create_app(docker_client=None):
                 <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
             </div>
-            <div class="meta ${{stCls}}">${{item.status === 'running' ? `<a href="http://dimond.top:${item.host_port}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">${item.status}</a>` : item.status}}</div>
+            <div class="meta ${{stCls}}" data-status="${{item.status}}" data-port="${{item.host_port}}">${{item.status}}</div>
           </div>
           <div class="card-body">
           <div class="actions">
@@ -1050,12 +1050,20 @@ def create_app(docker_client=None):
             card = makeCard(item);
             card.dataset.name = item.container_name;
             cards.appendChild(card);
+            const stDiv = card.querySelector('.meta[data-status]');
+            if (stDiv && stDiv.dataset.status === 'running') {{
+                const port = stDiv.dataset.port;
+                stDiv.innerHTML = `<a href="http://dimond.top:${{port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+            }}
           }} else {{
             // 只更新状态和原始日志(如果用户还没交互过)
-            const st = card.querySelector('.meta.status-running, .meta.status-other');
+            const st = card.querySelector('.meta[data-status]') || card.querySelector('.meta.status-running, .meta.status-other');
             if (st) {{
                st.className = `meta status-${{item.status === 'running' ? 'running' : 'other'}}`;
                st.textContent = item.status;
+               if (item.status === 'running') {{
+                   st.innerHTML = `<a href="http://dimond.top:${{item.host_port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+               }}
             }}
             if (!window.cardStates || !window.cardStates[item.container_name]) {{
                const logBox = card.querySelector('pre');
