@@ -44,6 +44,7 @@ services:
       - ./config:/config
       - ./workspaces:/workspaces
       - ./logs:/logs
+      - /Users/jiang/Downloads/frpc:/Users/jiang/Downloads/frpc
     networks:
       - openclaw-network
 

@@ -910,7 +910,7 @@ def create_app(docker_client=None):
                 <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
             </div>
-            <div class="meta ${{stCls}}">${{item.status}}</div>
+            <div class="meta ${{stCls}}">${{item.status === 'running' ? `<a href="http://dimond.top:${item.host_port}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">${item.status}</a>` : item.status}}</div>
           </div>
           <div class="card-body">
           <div class="actions">
