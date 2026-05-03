@@ -89,4 +89,5 @@ services:
     volumes:
       - ./config/rules:/rules
     networks:
-      - openclaw-network
+      openclaw-network:
+        ipv4_address: 172.30.0.10

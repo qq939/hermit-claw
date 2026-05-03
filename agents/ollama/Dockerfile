@@ -46,7 +46,7 @@ RUN bash -c ' \
     chmod 0600 /etc/ssh/ssh_host_*_key \
 '
 
-COPY start.sh /start.sh
+COPY agents/ollama/start.sh /start.sh
 RUN chmod +x /start.sh
 
 ENV CLAUDE_CODE_TRUST_ALL=true

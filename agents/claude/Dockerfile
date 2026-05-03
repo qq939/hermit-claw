@@ -27,7 +27,7 @@ RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && chown -R 501:20 /etc/ssh/ssh_host_*_key \
     && chmod 0600 /etc/ssh/ssh_host_*_key
 
-COPY start.sh /start.sh
+COPY agents/claude/start.sh /start.sh
 RUN chmod +x /start.sh
 
 ENV CLAUDE_CODE_TRUST_ALL=true
