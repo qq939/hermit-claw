@@ -209,6 +209,8 @@ def create_app(docker_client=None):
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
+        os.chown(f"{host_logs_root}/{container_name}", 501, 20)
+        os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
@@ -336,6 +338,8 @@ def create_app(docker_client=None):
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
+        os.chown(f"{host_logs_root}/{container_name}", 501, 20)
+        os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:

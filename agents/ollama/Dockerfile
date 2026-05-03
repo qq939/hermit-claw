@@ -60,6 +60,7 @@ EXPOSE 8082
 CMD ["/bin/sh", "-lc", " \
     mkdir -p \"$HOME/.claude\"; \
     if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.claude/\"; fi; \
+    rm -rf \"$HOME/.claude/workspace\"; \
     mkdir -p /home/agent/.claude/workspace/project/logs; \
     /usr/sbin/sshd; \
     if ! pgrep ollama > /dev/null 2>&1; then \
