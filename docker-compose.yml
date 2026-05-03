@@ -45,6 +45,7 @@ services:
       - ./workspaces:/workspaces
       - ./logs:/logs
       - /Users/jiang/Downloads/frpc:/Users/jiang/Downloads/frpc
+      - ./config/rules:/config/rules
     networks:
       - openclaw-network
 
@@ -84,10 +85,5 @@ services:
       - DOCKER_HOST=host.docker.internal
       - SSH_USER=agent
       - SSH_PASS=agent
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./config/rules:/rules
     networks:
-      openclaw-network:
-        ipv4_address: 172.30.0.10
+      - openclaw-network

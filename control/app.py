@@ -2,7 +2,6 @@ INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（�
 import os
 import re
 import sys
-import time
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -146,6 +145,32 @@ def create_app(docker_client=None):
         except Exception as e:
             print(f"[frpc] ERROR: {e}", flush=True, file=sys.stderr)
 
+    def scp_rules_to_container(container_name, project_path):
+        rules_dir = "/config/rules"
+        if not os.path.exists(rules_dir):
+            print(f"[scp] {rules_dir} does not exist, skipping", flush=True, file=sys.stderr)
+            return
+        files = [f for f in os.listdir(rules_dir) if os.path.isfile(os.path.join(rules_dir, f))]
+        if not files:
+            print(f"[scp] no files in {rules_dir}, skipping", flush=True, file=sys.stderr)
+            return
+        try:
+            import paramiko
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=container_name, port=22, username="agent", password="agent", timeout=15, allow_agent=False, look_for_keys=False)
+            sftp = ssh.open_sftp()
+            for fname in files:
+                src = os.path.join(rules_dir, fname)
+                dst = os.path.join(project_path, fname)
+                sftp.put(src, dst)
+                print(f"[scp] copied {fname} -> {project_path}/", flush=True, file=sys.stderr)
+            sftp.close()
+            ssh.close()
+            print(f"[scp] done, {len(files)} files copied", flush=True, file=sys.stderr)
+        except Exception as e:
+            print(f"[scp] ERROR: {e}", flush=True, file=sys.stderr)
+
     def find_next_port():
         used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
         for port in range(START_HOST_PORT, END_HOST_PORT + 1):
@@ -271,7 +296,6 @@ def create_app(docker_client=None):
                     pass
             env_vars["OPENCLAW_GATEWAY_HOST"] = "172.30.0.10"
             env_vars["OPENCLAW_GATEWAY_PORT"] = "18790"
-            env_vars["SSH_GATEWAY_HOST"] = "172.30.0.10"
 
         container = docker_client_or_default().containers.run(
             spec["image"],
@@ -391,7 +415,6 @@ def create_app(docker_client=None):
                                 break
                 except Exception:
                     pass
-            env_vars["SSH_GATEWAY_HOST"] = "172.30.0.10"
 
         new_container = docker_client_or_default().containers.run(
             spec["image"],
@@ -517,6 +540,19 @@ def create_app(docker_client=None):
             return
 
         try:
+            client = docker_client_or_default()
+            try:
+                container = client.containers.get(container_name)
+            except Exception:
+                ws.close()
+                return
+            labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
+            if agent_type in ("claude", "ollama"):
+                project_path = "/home/agent/.claude/workspace/project"
+            else:
+                project_path = "/home/agent/.openclaw/workspace/project"
+
             import paramiko
         except ImportError:
             ws.send("paramiko not installed\r\n")
@@ -525,19 +561,6 @@ def create_app(docker_client=None):
 
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        try:
-            client = docker_client_or_default()
-            container = client.containers.get(container_name)
-            labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or {}
-            agent_type = labels.get("hermit.agent_type", "")
-        except Exception:
-            agent_type = ""
-
-        if agent_type in ("claude", "ollama"):
-            ssh_workspace = "/home/agent/.claude/workspace/project"
-        else:
-            ssh_workspace = "/home/agent/.openclaw/workspace/project"
 
         try:
             ssh.connect(
@@ -557,9 +580,9 @@ def create_app(docker_client=None):
 
             chan = ssh.invoke_shell(term="xterm-256color", width=80, height=24)
             chan.settimeout(0.1)
-            time.sleep(0.3)
-            chan.send(f"cd {ssh_workspace}\r")
-            time.sleep(0.2)
+
+            chan.send(f"cd {project_path}\r")
+            chan.send("clear\r")
 
             def pump():
                 try:
@@ -629,6 +652,10 @@ def create_app(docker_client=None):
         try:
             payload = create_agent(agent_type, name, body)
             add_frpc_rule(payload["host_port"])
+            if agent_type in ("claude", "ollama"):
+                scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
+            else:
+                scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
             return jsonify(payload), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -733,8 +760,14 @@ def create_app(docker_client=None):
             container = docker_client_or_default().containers.get(name)
             if not is_managed(container):
                 return jsonify({"error": "Only managed agents can be recreated"}), 400
+            labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
             payload = recreate_agent(name)
             add_frpc_rule(payload["host_port"])
+            if agent_type in ("claude", "ollama"):
+                scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
+            else:
+                scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
             return jsonify(payload)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -763,8 +796,14 @@ def create_app(docker_client=None):
         errors = {}
         for c in managed_containers():
             try:
+                labels = ((c.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+                agent_type = labels.get("hermit.agent_type", "")
                 payload = recreate_agent(c.name)
                 add_frpc_rule(payload["host_port"])
+                if agent_type in ("claude", "ollama"):
+                    scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
+                else:
+                    scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
                 recreated.append(payload)
             except Exception as e:
                 errors[c.name] = str(e)
