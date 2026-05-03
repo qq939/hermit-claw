@@ -57,20 +57,4 @@ USER agent
 WORKDIR /home/agent/.claude/workspace/project
 EXPOSE 8082
 
-CMD ["/bin/sh", "-lc", " \
-    mkdir -p \"$HOME/.claude\"; \
-    if [ -d /agent-config ]; then cp -R -f /agent-config/. \"$HOME/.claude/\"; fi; \
-    rm -rf \"$HOME/.claude/workspace\"; \
-    mkdir -p /home/agent/.claude/workspace/project/logs; \
-    /usr/sbin/sshd; \
-    if ! pgrep ollama > /dev/null 2>&1; then \
-        nohup ollama serve >> /home/agent/.claude/workspace/project/logs/ollama.log 2>&1 & \
-        sleep 5; \
-        if [ -n \"$OLLAMA_MODEL\" ]; then ollama pull \"$OLLAMA_MODEL\" 2>/dev/null || true; fi; \
-    fi; \
-    node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[\"/home/agent/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(process.env.HOME+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; \
-    if [ -f /home/agent/.claude/workspace/project/start.sh ] && [ -s /home/agent/.claude/workspace/project/start.sh ]; then \
-        chmod +x /home/agent/.claude/workspace/project/start.sh; \
-        nohup bash /home/agent/.claude/workspace/project/start.sh >> /home/agent/.claude/workspace/project/logs/start.log 2>&1 & \
-    fi; \
-    exec tail -f /dev/null"]
+CMD ["/bin/sh", "-lc", "mkdir -p \"$HOME/.claude\"; mkdir -p \"$HOME/.claude/workspace/project/logs\"; if [ -d /agent-config ]; then for f in /agent-config/*; do [ \"$f\" = \"/agent-config/workspace\" ] && continue; [ -d \"$f\" ] && cp -R \"$f\" \"$HOME/.claude/\" 2>/dev/null || [ -f \"$f\" ] && cp -f \"$f\" \"$HOME/.claude/\" 2>/dev/null; done; fi; /usr/sbin/sshd; if ! pgrep ollama > /dev/null 2>&1; then nohup ollama serve >> \"$HOME/.claude/workspace/project/logs/ollama.log\" 2>&1 & sleep 5; if [ -n \"$OLLAMA_MODEL\" ]; then ollama pull \"$OLLAMA_MODEL\" 2>/dev/null || true; fi; fi; node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[\"/home/agent/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(process.env.HOME+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; if [ -f \"$HOME/.claude/workspace/project/start.sh\" ] && [ -s \"$HOME/.claude/workspace/project/start.sh\" ]; then chmod +x \"$HOME/.claude/workspace/project/start.sh\"; nohup bash \"$HOME/.claude/workspace/project/start.sh\" >> \"$HOME/.claude/workspace/project/logs/start.log\" 2>&1 & fi; exec tail -f /dev/null"]
