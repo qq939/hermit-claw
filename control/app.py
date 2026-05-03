@@ -632,6 +632,7 @@ def create_app(docker_client=None):
 
             chan = ssh.invoke_shell(term="xterm-256color", width=80, height=24)
             chan.settimeout(0.1)
+            chan.send("cd /home/agent/.claude/workspace/project/ && clear\r")
 
             def pump():
                 try:
