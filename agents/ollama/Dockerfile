@@ -34,10 +34,20 @@ RUN bash -c ' \
     echo "agent:agent" | chpasswd; \
     echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent; \
     chmod 0440 /etc/sudoers.d/agent; \
+    mkdir -p /home/agent/.claude/workspace/project/logs; \
+    printf "%s" "\"{\"hasCompletedOnboarding\":true,\"hasTrustDialogAccepted\":true,\"hasCompletedProjectOnboarding\":true}\"" > /home/agent/.claude.json; \
+    printf "%s" "Y29uc3Qge3NwYXdufT1yZXF1aXJlKCJjaGlsZF9wcm9jZXNzIik7Y29uc3QgeGM9c3Bhd24oImNsYXVkZSIsWyItLWRhbmdlcm91c2x5LXNraXAtcGVybWlzc2lvbnMiLCItLWNvbnRpbnVlIiwiLS1wcmludCJdLHtzdGlvOlsicGlwZSIsImluaGVyaXQiLCJpbmhlcml0Il0sc2hlbGw6dHJ1ZSxlbnY6ey4uLnByb2Nlc3MuZW52LEFOVFJPUElDX0RJU0FCTEVfUFJFRkxJR0hUOiIxIn19KTtjLnN0ZGluLmVuZChCdWZmZXIuZnJvbShwcm9jZXNzLmVudi5DTEFVRExFX01TR0csImJhc2U2NCIpLnRvU3RyaW5nKCJ1dGY4IikpOw==" | base64 -d > /home/agent/.claude/run_claude.js; \
+    chmod +x /home/agent/.claude/run_claude.js; \
+    printf "%s\n" "#!/bin/bash" "cd /home/agent/.claude/workspace/project" "if [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi" > /home/agent/.claude/workspace/project/start.sh; \
+    chmod +x /home/agent/.claude/workspace/project/start.sh; \
     ssh-keygen -A; \
+    chown -R 501:20 /home/agent/.claude /home/agent/.claude.json; \
     chown -R 501:20 /etc/ssh/ssh_host_*_key; \
     chmod 0600 /etc/ssh/ssh_host_*_key \
 '
+
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 ENV CLAUDE_CODE_TRUST_ALL=true
 ENV CLAUDE_CODE_SKIP_ONBOARDING=true
@@ -45,9 +55,10 @@ ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 ENV ANTHROPIC_BASE_URL=http://192.168.0.209:11435
 ENV ANTHROPIC_AUTH_TOKEN=ollama
 ENV OLLAMA_MODEL=qwen3.5
+ENV SSH_GATEWAY_HOST=172.30.0.10
 
 USER agent
-WORKDIR /home/agent
+WORKDIR /home/agent/.claude/workspace/project
 EXPOSE 8082
 
-CMD ["/usr/sbin/sshd", "-D"]
+CMD ["/start.sh"]

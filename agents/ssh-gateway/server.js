@@ -1,16 +1,44 @@
 const { WebSocketServer } = require('ws');
-const { spawn } = require('child_process');
+const { spawn, readFileSync, readdirSync, statSync } = require('fs');
+const { join, basename } = require('path');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
 const DOCKER_HOST = process.env.DOCKER_HOST || 'host.docker.internal';
 const SSH_USER = process.env.SSH_USER || 'agent';
 const SSH_PASS = process.env.SSH_PASS || 'agent';
+const RULES_DIR = process.env.RULES_DIR || '/rules';
 
 const server = http.createServer((req, res) => {
     if (req.url === '/health') {
         res.writeHead(200);
         res.end('OK');
+        return;
+    }
+    if (req.url.startsWith('/rules/') || req.url === '/rules') {
+        const urlPath = req.url === '/rules' ? '/' : req.url.slice('/rules/'.length);
+        if (req.url === '/rules' || req.url === '/rules/') {
+            try {
+                const files = readdirSync(RULES_DIR).filter(f => statSync(join(RULES_DIR, f)).isFile());
+                res.writeHead(200, {'Content-Type': 'application/json'});
+                res.end(JSON.stringify({ files }));
+                return;
+            } catch (e) {
+                res.writeHead(500);
+                res.end('Rules dir error');
+                return;
+            }
+        }
+        const filename = basename(urlPath);
+        const filepath = join(RULES_DIR, filename);
+        try {
+            const content = readFileSync(filepath);
+            res.writeHead(200, {'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${filename}"`});
+            res.end(content);
+        } catch (e) {
+            res.writeHead(404);
+            res.end('File not found');
+        }
         return;
     }
     res.writeHead(404);

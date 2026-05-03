@@ -84,5 +84,9 @@ services:
       - DOCKER_HOST=host.docker.internal
       - SSH_USER=agent
       - SSH_PASS=agent
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/rules:/rules
     networks:
       - openclaw-network

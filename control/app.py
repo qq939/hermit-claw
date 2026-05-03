@@ -2,6 +2,7 @@ INITIAL_MESSAGE = "你生来就是为了开发、看护、运维web app 8082（�
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -131,19 +132,19 @@ def create_app(docker_client=None):
             with open(FRPC_CONFIG_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
             if f"[{section}]" in content:
-                
+                print(f"[frpc] port {port} already configured, skipping", flush=True, file=sys.stderr)
                 return
             with open(FRPC_CONFIG_PATH, "a", encoding="utf-8") as f:
                 f.write(entry)
-            
+            print(f"[frpc] added rule for port {port}, restarting frpc via docker-py...", flush=True, file=sys.stderr)
             try:
                 client = docker_client_or_default()
                 client.containers.get("frpc").restart()
-                
+                print(f"[frpc] frpc restarted successfully", flush=True, file=sys.stderr)
             except Exception as re:
-                pass
+                print(f"[frpc] WARNING: docker restart frpc failed: {re}", flush=True, file=sys.stderr)
         except Exception as e:
-            pass
+            print(f"[frpc] ERROR: {e}", flush=True, file=sys.stderr)
 
     def find_next_port():
         used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
@@ -270,6 +271,7 @@ def create_app(docker_client=None):
                     pass
             env_vars["OPENCLAW_GATEWAY_HOST"] = "172.30.0.10"
             env_vars["OPENCLAW_GATEWAY_PORT"] = "18790"
+            env_vars["SSH_GATEWAY_HOST"] = "172.30.0.10"
 
         container = docker_client_or_default().containers.run(
             spec["image"],
@@ -288,55 +290,9 @@ def create_app(docker_client=None):
             extra_hosts=["host.docker.internal:host-gateway"],
         )
 
-        # 容器创建后：Python tarfile 流式拷贝 workspace 文件到 bind mount 目录
-        import time, tarfile, io
-        time.sleep(2)
-        if agent_type in ("claude", "ollama"):
-            src_workspace = f"/config/{spec['config_subdir']}/workspace"
-            
-            dst_in_container = "/home/agent/.claude/workspace/project"
-            if os.path.isdir(src_workspace):
-                
-                try:
-                    import subprocess
-                    p = subprocess.Popen(
-                        ["tar", "cf", "-", "--exclude=logs", "-C", src_workspace, "."],
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-                    )
-                    stdout, stderr = p.communicate()
-                    if stdout:
-                        ok = container.put_archive(dst_in_container, stdout)
-                        if not ok:
-                            print(f"[workspace copy] put_archive returned False, stderr: {stderr[:200]}", flush=True, file=sys.stderr)
-                        try:
-                            container.exec_run(["chown", "-R", "501:20", dst_in_container], user="root")
-                        except Exception:
-                            pass
-                    else:
-                        print(f"[workspace copy] tar produced no output: {stderr[:200]}", flush=True, file=sys.stderr)
-                except Exception as e:
-                    print(f"[workspace copy] failed: {type(e).__name__}: {e}", flush=True, file=sys.stderr)
-            run_claude_js = (
-                "const {spawn}=require('child_process');"
-                "const c=spawn('claude',['--dangerously-skip-permissions','--continue','--print'],"
-                "{stdio:['pipe','inherit','inherit'],shell:true,env:{...process.env,ANTHROPIC_DISABLE_PREFLIGHT:'1'}});"
-                "c.stdin.end(Buffer.from(process.env.CLAUDE_MSG,'base64').toString('utf8'));\n"
-            )
-            b64 = __import__('base64').b64encode(run_claude_js.encode('utf-8')).decode('ascii')
-            try:
-                js_buf = io.BytesIO()
-                with tarfile.open(fileobj=js_buf, mode="w") as tf:
-                    info = tarfile.TarInfo("run_claude.js")
-                    info.size = len(run_claude_js)
-                    tf.addfile(info, io.BytesIO(run_claude_js.encode("utf-8")))
-                js_buf.seek(0)
-                container.put_archive("/home/agent", js_buf.read())
-                container.exec_run(["chmod", "+x", "/home/agent/run_claude.js"], user="root")
-            except Exception as e:
-                print(f"[run_claude.js copy] failed: {e}", flush=True, file=sys.stderr)
-
         # 创建容器后发送初始消息
-        time.sleep(1)
+        import time
+        time.sleep(3)
         user_msg = (body.get("message") or "").strip()
         msg_file = "/tmp/send_msg.sh"
         if agent_type in ("claude", "ollama"):
@@ -345,7 +301,7 @@ def create_app(docker_client=None):
             msg_to_send = user_msg or default_msg
             escaped_msg = msg_to_send.replace("'", "'\"'\"'")
             msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-            script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/run_claude.js >> '{log_path}' 2>&1"
+            script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
         else:
             default_msg = INITIAL_MESSAGE.format(agent="openclaw")
             log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
@@ -435,6 +391,7 @@ def create_app(docker_client=None):
                                 break
                 except Exception:
                     pass
+            env_vars["SSH_GATEWAY_HOST"] = "172.30.0.10"
 
         new_container = docker_client_or_default().containers.run(
             spec["image"],
@@ -457,51 +414,6 @@ def create_app(docker_client=None):
             network="hermit-claw_openclaw-network",
             extra_hosts=["host.docker.internal:host-gateway"],
         )
-
-        import time, tarfile, io
-        time.sleep(2)
-        if agent_type in ("claude", "ollama"):
-            src_workspace = f"/config/{spec['config_subdir']}/workspace"
-            dst_in_container = "/home/agent/.claude/workspace/project"
-            if os.path.isdir(src_workspace):
-                try:
-                    import subprocess
-                    p = subprocess.Popen(
-                        ["tar", "cf", "-", "--exclude=logs", "-C", src_workspace, "."],
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-                    )
-                    stdout, stderr = p.communicate()
-                    if stdout:
-                        ok = new_container.put_archive(dst_in_container, stdout)
-                        if not ok:
-                            print(f"[workspace copy] put_archive returned False, stderr: {stderr[:200]}", flush=True, file=sys.stderr)
-                        try:
-                            new_container.exec_run(["chown", "-R", "501:20", dst_in_container], user="root")
-                        except Exception:
-                            pass
-                    else:
-                        print(f"[workspace copy] tar produced no output: {stderr[:200]}", flush=True, file=sys.stderr)
-                except Exception as e:
-                    print(f"[workspace copy] failed: {type(e).__name__}: {e}", flush=True, file=sys.stderr)
-            run_claude_js = (
-                "const {spawn}=require('child_process');"
-                "const c=spawn('claude',['--dangerously-skip-permissions','--continue','--print'],"
-                "{stdio:['pipe','inherit','inherit'],shell:true,env:{...process.env,ANTHROPIC_DISABLE_PREFLIGHT:'1'}});"
-                "c.stdin.end(Buffer.from(process.env.CLAUDE_MSG,'base64').toString('utf8'));\n"
-            )
-            b64 = __import__('base64').b64encode(run_claude_js.encode('utf-8')).decode('ascii')
-            try:
-                js_buf = io.BytesIO()
-                with tarfile.open(fileobj=js_buf, mode="w") as tf:
-                    info = tarfile.TarInfo("run_claude.js")
-                    info.size = len(run_claude_js)
-                    tf.addfile(info, io.BytesIO(run_claude_js.encode("utf-8")))
-                js_buf.seek(0)
-                new_container.put_archive("/home/agent", js_buf.read())
-                new_container.exec_run(["chmod", "+x", "/home/agent/run_claude.js"], user="root")
-            except Exception as e:
-                print(f"[run_claude.js copy] failed: {e}", flush=True, file=sys.stderr)
-
         return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
     def format_item(container, tail):
@@ -615,6 +527,19 @@ def create_app(docker_client=None):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         try:
+            client = docker_client_or_default()
+            container = client.containers.get(container_name)
+            labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
+        except Exception:
+            agent_type = ""
+
+        if agent_type in ("claude", "ollama"):
+            ssh_workspace = "/home/agent/.claude/workspace/project"
+        else:
+            ssh_workspace = "/home/agent/.openclaw/workspace/project"
+
+        try:
             ssh.connect(
                 hostname=container_name,
                 port=22,
@@ -632,7 +557,9 @@ def create_app(docker_client=None):
 
             chan = ssh.invoke_shell(term="xterm-256color", width=80, height=24)
             chan.settimeout(0.1)
-            chan.send("cd /home/agent/.claude/workspace/project/ && clear\r")
+            time.sleep(0.3)
+            chan.send(f"cd {ssh_workspace}\r")
+            time.sleep(0.2)
 
             def pump():
                 try:
@@ -764,7 +691,7 @@ def create_app(docker_client=None):
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/run_claude.js >> '{log_path}' 2>&1"
+                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
             else:
                 default_msg = INITIAL_MESSAGE.format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
