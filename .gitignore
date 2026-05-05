@@ -1,5 +1,8 @@
 .venv/
 venv/
+config/
+node_modules/
+uploads/
 __pycache__/
 *.pyc
 *.pyo
