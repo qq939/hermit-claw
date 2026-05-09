@@ -29,6 +29,9 @@ RUN bash -c ' \
     done \
 '
 
+
+COPY run_claude.js /home/agent/.claude/run_claude.js
+
 RUN bash -c ' \
     useradd -m -s /bin/bash -u 501 -g 20 agent; \
     echo "agent:agent" | chpasswd; \
@@ -36,7 +39,6 @@ RUN bash -c ' \
     chmod 0440 /etc/sudoers.d/agent; \
     mkdir -p /home/agent/.claude/workspace/project/logs; \
     printf "%s" "\"{\"hasCompletedOnboarding\":true,\"hasTrustDialogAccepted\":true,\"hasCompletedProjectOnboarding\":true}\"" > /home/agent/.claude.json; \
-    printf "%s" "Y29uc3Qge3NwYXdufT1yZXF1aXJlKCJjaGlsZF9wcm9jZXNzIik7Y29uc3QgeGM9c3Bhd24oImNsYXVkZSIsWyItLWRhbmdlcm91c2x5LXNraXAtcGVybWlzc2lvbnMiLCItLWNvbnRpbnVlIiwiLS1wcmludCJdLHtzdGlvOlsicGlwZSIsImluaGVyaXQiLCJpbmhlcml0Il0sc2hlbGw6dHJ1ZSxlbnY6eyouLi5wcm9jZXNzLmVudixBTlRST1BPUEVDX0RJU0FCTEVfUFJFRkxJR0hUOiIxIn19KTtjLnN0ZGluLmVuZChCdWZmZXIuZnJvbShwcm9jZXNzLmVudi5DTEFVRExFX01TR0csImJhc2U2NCIpLnRvU3RyaW5nKCJ1dGY4IikpOw==" | base64 -d > /home/agent/.claude/run_claude.js; \
     chmod +x /home/agent/.claude/run_claude.js; \
     printf "%s\n" "#!/bin/bash" "cd /home/agent/.claude/workspace/project" "if [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi" > /home/agent/.claude/workspace/project/start.sh; \
     chmod +x /home/agent/.claude/workspace/project/start.sh; \

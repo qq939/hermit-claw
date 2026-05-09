@@ -118,7 +118,7 @@ def create_app(docker_client=None):
         except (TypeError, ValueError, AttributeError):
             return None
 
-    FRPC_CONFIG_PATH = "/Users/jiang/Downloads/frpc/frpc.ini"
+    FRPC_CONFIG_PATH = os.path.join(FRPC_PATH, "frpc.ini")
 
     def add_frpc_rule(port):
         section = f"mac{port}"
