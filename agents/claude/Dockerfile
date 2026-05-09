@@ -12,8 +12,6 @@ RUN for i in 1 2 3 4 5; do \
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
-RUN npm install -g @anthropic-ai/skills && npx skills add supabase/agent-skills
-
 RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && echo "agent:agent" | chpasswd \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
@@ -37,4 +35,4 @@ USER agent
 WORKDIR /home/agent/.claude/workspace/project
 EXPOSE 8082
 
-CMD ["/bin/sh", "-lc", "mkdir -p \"$HOME/.claude\"; mkdir -p \"$HOME/.claude/workspace/project/logs\"; if [ -d /agent-config ]; then for f in /agent-config/*; do [ \"$f\" = \"/agent-config/workspace\" ] && continue; [ -d \"$f\" ] && cp -R \"$f\" \"$HOME/.claude/\" 2>/dev/null || [ -f \"$f\" ] && cp -f \"$f\" \"$HOME/.claude/\" 2>/dev/null; done; fi; /usr/sbin/sshd; node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[\"/home/agent/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(process.env.HOME+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; if [ -f \"$HOME/.claude/workspace/project/start.sh\" ] && [ -s \"$HOME/.claude/workspace/project/start.sh\" ]; then chmod +x \"$HOME/.claude/workspace/project/start.sh\"; nohup bash \"$HOME/.claude/workspace/project/start.sh\" >> \"$HOME/.claude/workspace/project/logs/start.log\" 2>&1 & fi; exec tail -f /dev/null"]
+CMD ["/bin/sh", "-lc", "AGENT_HOME=\"$HOME\"; mkdir -p \"$AGENT_HOME/.claude\"; mkdir -p \"$AGENT_HOME/.claude/workspace/project/logs\"; if [ -d /agent-config ]; then for f in /agent-config/*; do [ \"$f\" = \"/agent-config/workspace\" ] && continue; [ -d \"$f\" ] && cp -R \"$f\" \"$AGENT_HOME/.claude/\" 2>/dev/null || [ -f \"$f\" ] && cp -f \"$f\" \"$AGENT_HOME/.claude/\" 2>/dev/null; done; fi; /usr/sbin/sshd; node -e 'const fs=require(\"fs\"); const h=process.env.HOME; const p=h+\"/.claude/settings.json\"; let j={}; if(fs.existsSync(p)){ j=JSON.parse(fs.readFileSync(p,\"utf8\")); } j.trustedProjects=[h+\"/.claude/workspace/project\"]; j.hasCompletedOnboarding=true; j.hasTrustDialogAccepted=true; j.hasCompletedProjectOnboarding=true; fs.writeFileSync(p, JSON.stringify(j)); fs.writeFileSync(h+\"/.claude.json\", JSON.stringify({hasCompletedOnboarding:true,hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}));'; if [ -f \"$HOME/.claude/workspace/project/start.sh\" ] && [ -s \"$HOME/.claude/workspace/project/start.sh\" ]; then chmod +x \"$HOME/.claude/workspace/project/start.sh\"; nohup bash \"$HOME/.claude/workspace/project/start.sh\" >> \"$HOME/.claude/workspace/project/logs/start.log\" 2>&1 & fi; exec tail -f /dev/null"]

@@ -31,8 +31,6 @@ RUN bash -c ' \
     done \
 '
 
-RUN npm install -g @anthropic-ai/skills && npx skills add supabase/agent-skills
-
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
 EXPOSE 8082

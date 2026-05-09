@@ -29,8 +29,6 @@ RUN bash -c ' \
     done \
 '
 
-RUN npm install -g @anthropic-ai/skills && npx skills add supabase/agent-skills
-
 RUN bash -c ' \
     useradd -m -s /bin/bash -u 501 -g 20 agent; \
     echo "agent:agent" | chpasswd; \
