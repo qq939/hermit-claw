@@ -1,4 +1,6 @@
 INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。最后更新README.md和SKILL.md"
+# Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
+FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
 import os
 import re
 import sys
@@ -12,9 +14,9 @@ from flask_sock import Sock
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
-START_HOST_PORT = 18081
+START_HOST_PORT = 18000
 # Used in find_next_port (line 76) as the upper bound for generated host ports.
-END_HOST_PORT = 19999
+END_HOST_PORT = 18999
 # Used in create_agent (line 123) and API responses to enforce fixed in-container service port.
 SERVICE_PORT = 8082
 # Used in helper filters (line 52, 67) to identify containers created by this control plane.
@@ -764,6 +766,26 @@ def create_app(docker_client=None):
         except docker.errors.APIError as e:
             return jsonify({"error": f"Docker API error: {str(e)}"}), 500
 
+    @app.post("/api/agents/<path:name>/cleanup-context")
+    def api_cleanup_context(name):
+        try:
+            container = _require_managed(name)
+            labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
+            if agent_type in ("claude", "ollama"):
+                cmd = "rm -f ~/.claude/projects/*/*.jsonl 2>/dev/null; echo done"
+            else:
+                cmd = "rm -f ~/.openclaw/projects/*/*.jsonl 2>/dev/null; echo done"
+            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
+            output = result.output.decode("utf-8", errors="replace").strip()
+            return jsonify({"ok": True, "container_name": name, "output": output})
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.post("/api/agents/<path:name>/recreate")
     def api_recreate_agent(name):
         try:
@@ -998,6 +1020,7 @@ def create_app(docker_client=None):
             <button data-action="refresh">刷新日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
+            <button data-action="cleanup-context">清理上下文</button>
             <button data-action="init">发送初始消息</button>
           </div>
           <div class="cmd-bar">
@@ -1064,6 +1087,16 @@ def create_app(docker_client=None):
             return;
           }}
           logBox.textContent += `\n(已发送初始消息)\n`;
+        }};
+        div.querySelector('button[data-action="cleanup-context"]').onclick = async () => {{
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/cleanup-context`, {{ method: "POST" }});
+          if (!r.ok) {{
+            const d = await r.json();
+            logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+            return;
+          }}
+          const d = await r.json();
+          logBox.textContent += `\n(上下文已清理) ${{d.output || ""}}\n`;
         }};
         div.querySelector('button[data-action="send"]').onclick = () => sendMessage();
         
