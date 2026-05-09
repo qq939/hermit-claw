@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim
 RUN for i in 1 2 3 4 5; do \
         apt-get update && break || { rm -rf /var/lib/apt/lists/*; apt-get update; } \
     done \
-    && apt-get install -y --no-install-recommends ca-certificates sudo git coreutils openssh-server \
+    && apt-get install -y --no-install-recommends ca-certificates sudo git coreutils openssh-server fonts-noto-cjk curl \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/run/sshd \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \
@@ -11,6 +11,8 @@ RUN for i in 1 2 3 4 5; do \
     && sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
+
+RUN npm install -g @anthropic-ai/skills && npx skills add supabase/agent-skills
 
 RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && echo "agent:agent" | chpasswd \

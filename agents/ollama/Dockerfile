@@ -4,7 +4,7 @@ RUN bash -c ' \
     for attempt in 1 2 3; do \
         set +e; \
         apt-get update && apt-get install -y --no-install-recommends \
-            ca-certificates sudo curl git coreutils openssh-server gnupg python3 \
+            ca-certificates sudo curl git coreutils openssh-server gnupg python3 fonts-noto-cjk \
             && break; \
         sleep 10; \
     done; \
@@ -28,6 +28,8 @@ RUN bash -c ' \
         sleep 10; \
     done \
 '
+
+RUN npm install -g @anthropic-ai/skills && npx skills add supabase/agent-skills
 
 RUN bash -c ' \
     useradd -m -s /bin/bash -u 501 -g 20 agent; \
