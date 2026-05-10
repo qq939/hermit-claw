@@ -14,7 +14,7 @@ from flask_sock import Sock
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
-START_HOST_PORT = 18000
+START_HOST_PORT = 18081
 # Used in find_next_port (line 76) as the upper bound for generated host ports.
 END_HOST_PORT = 18999
 # Used in create_agent (line 123) and API responses to enforce fixed in-container service port.
@@ -104,7 +104,7 @@ def create_app(docker_client=None):
             if is_managed(c):
                 items.append(c)
                 continue
-            if is_compose_member(c) and c.name != "hermit-control-18080":
+            if is_compose_member(c) and c.name not in ("hermit-control-18080", "hermit-ssh-gateway", "openclaw-gateway") and c.name.startswith("hermit-agent-"):
                 items.append(c)
         return sorted(items, key=lambda c: c.name)
 
