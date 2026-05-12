@@ -44,6 +44,7 @@ services:
       - ./config:/config
       - ./workspaces:/workspaces
       - ./logs:/logs
+      - ./logs/hermit:/logs/hermit
       - /Users/jimjiang/Downloads/frpc:/Users/jimjiang/Downloads/frpc
       - ./config/rules:/config/rules
     networks:

@@ -657,24 +657,28 @@ def create_app(docker_client=None):
                 return jsonify({"error": "message is required"})
             system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在/config Use Skill: user-rules 里面"
             full_message = f"{system_prompt}\n\n{user_message}"
-            log_file = "/logs/debug.log"
+            log_file = "/logs/hermit/debug.log"
+            import tempfile, os
+            tmp_file = tempfile.mktemp(suffix=".txt")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                f.write(full_message)
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n=== {now_iso()} ===\n")
                 f.write(f"User message: {user_message}\n")
                 f.write(f"Full message:\n{full_message}\n")
+                f.write(f"Temp file: {tmp_file}\n")
             import subprocess
             result = subprocess.run(
-                ["node", "-e", f"const m=require('child_process');const c=m.spawn('claude',['--dangerously-skip-permissions','--continue','--print'],{{stdio:['pipe','pipe','pipe'],shell:true,env:{{...process.env,ANTHROPIC_DISABLE_PREFLIGHT:'1'}}}});c.stdin.end(Buffer.from('{full_message.replace(chr(39), chr(39)+chr(39))}','base64').toString('utf8'));let out='';c.stdout.on('data',d=>{{out+=d.toString()}});c.stderr.on('data',d=>{{console.error(d.toString())}});c.on('close',code=>{{console.log('__EXIT__'+code)}});"],
+                ["claude", "--continue", "-p", tmp_file],
                 capture_output=True, text=True, timeout=120
             )
+            os.unlink(tmp_file)
             output = result.stdout
             stderr = result.stderr
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"Return code: {result.returncode}\n")
                 f.write(f"STDOUT:\n{output}\n")
                 f.write(f"STDERR:\n{stderr}\n")
-            if "__EXIT__" in output:
-                output = output[:output.index("__EXIT__")].strip()
             return jsonify({"response": output or "(无输出)"})
         except subprocess.TimeoutExpired:
             return jsonify({"error": "请求超时（120秒）"})
@@ -834,6 +838,15 @@ def create_app(docker_client=None):
             cmd = 'cd ' + project_path + ' && CURRENT=$(git rev-parse --short HEAD 2>/dev/null); git log --format="$CURRENT %h %ad %s" --date=short -20 2>/dev/null || echo "not-a-git-repo"'
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
+            debug_log = "/logs/hermit/debug.log"
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"\n=== GIT COMMITS DEBUG ===\n")
+                f.write(f"container: {name}\n")
+                f.write(f"project_path: {project_path}\n")
+                f.write(f"agent_type: {agent_type}\n")
+                f.write(f"cmd: {cmd}\n")
+                f.write(f"exit_code: {result.exit_code}\n")
+                f.write(f"output:\n{output}\n")
             if "not-a-git-repo" in output:
                 return jsonify({"error": "项目不是 git 仓库"})
             commits = []
