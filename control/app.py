@@ -690,8 +690,9 @@ def create_app(docker_client=None):
 
             import subprocess
             # 移除 --dangerously-skip-permissions，确保在 root 下也能运行（如果配置了 config.json）
+            # 增加 --add-dir /config 以允许访问配置目录
             result = subprocess.run(
-                ["claude", "--continue", "-p", tmp_file],
+                ["claude", "--continue", "-p", tmp_file, "--add-dir", "/config"],
                 capture_output=True, text=True, timeout=120,
                 env=env
             )
