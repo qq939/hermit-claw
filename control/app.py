@@ -1177,6 +1177,8 @@ def create_app(docker_client=None):
         display: inline-flex;
         align-items: center;
         gap: 0;
+        width: auto;
+        flex: none;
         color: #2196F3;
         font-size: 11px;
         cursor: pointer;
@@ -1190,14 +1192,13 @@ def create_app(docker_client=None):
         padding: 0;
         width: 13px;
         height: 13px;
+        flex: none;
+        align-self: center;
         border: 1.5px solid #2196F3;
         border-radius: 3px;
         background: transparent;
-        flex: none;
         cursor: pointer;
         vertical-align: middle;
-        position: relative;
-        top: 0;
       }}
       .git-reset-label input[type="checkbox"]:checked {{
         background: #2196F3;
