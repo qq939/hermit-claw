@@ -906,15 +906,145 @@ def create_app(docker_client=None):
             container = _require_managed(name)
             data = request.get_json() or {}
             commit_hash = data.get("commit_hash", "")
+            hard_mode = data.get("hard_mode", False)
             if not commit_hash:
                 return jsonify({"error": "commit_hash is required"}), 400
+            
+            # 特殊处理 fork 功能
+            if commit_hash == "****FORK****":
+                labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+                agent_type = labels.get("hermit.agent_type", "")
+                if agent_type not in ("claude", "ollama"):
+                    return jsonify({"error": "fork 功能仅支持 claude/ollama 类型的容器"}), 400
+                
+                # 找到新的可用端口
+                new_port = find_next_port()
+                original_name = name
+                
+                # 准备新容器名
+                name_parts = original_name.split("-", 1)
+                new_container_name = f"{new_port}-{name_parts[1]}" if len(name_parts) > 1 else f"{new_port}-{original_name}"
+                
+                # 获取源和目标宿主机路径
+                host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
+                source_host_path = os.path.join(host_workspaces_root, original_name)
+                dest_host_path = os.path.join(host_workspaces_root, new_container_name)
+                
+                # 在宿主机上复制文件（先复制再创建容器，因为 create_agent 会创建目录）
+                import shutil
+                try:
+                    os.makedirs(dest_host_path, exist_ok=True)
+                    if os.path.exists(source_host_path):
+                        for item in os.listdir(source_host_path):
+                            src_item = os.path.join(source_host_path, item)
+                            dst_item = os.path.join(dest_host_path, item)
+                            if os.path.isdir(src_item):
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(src_item, dst_item)
+                    os.chown(dest_host_path, 501, 20)
+                except Exception as copy_err:
+                    import traceback
+                    with open("/logs/hermit/debug.log", "a", encoding="utf-8") as f:
+                        f.write(f"\n=== FORK COPY ERROR ===\n")
+                        f.write(f"source: {source_host_path}\n")
+                        f.write(f"dest: {dest_host_path}\n")
+                        f.write(f"error: {str(copy_err)}\n")
+                        f.write(traceback.format_exc())
+                
+                # 创建新容器（复用已复制的工作目录）
+                # 注意：这里需要绕过 create_agent 中的 os.makedirs，因为目录已经存在
+                spec = AGENT_SPECS[agent_type]
+                host_config_root = app.config["HOST_CONFIG_ROOT"]
+                host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
+                
+                if agent_type in ("claude", "ollama"):
+                    log_bind = "/home/agent/.claude/workspace/project/logs"
+                else:
+                    log_bind = "/home/agent/.openclaw/workspace/project/logs"
+                
+                volumes = {
+                    f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
+                    f"{dest_host_path}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+                    f"{dest_host_path}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
+                    f"{host_logs_root}/{new_container_name}": {"bind": log_bind, "mode": "rw"},
+                }
+                log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
+                
+                env_vars = {}
+                config_root = app.config["CONFIG_ROOT"]
+                settings_path = os.path.join(config_root, spec["config_subdir"], "settings.json")
+                if os.path.exists(settings_path):
+                    try:
+                        import json
+                        with open(settings_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if "env" in data and isinstance(data["env"], dict):
+                                for k, v in data["env"].items():
+                                    env_vars[k] = str(v)
+                    except Exception:
+                        pass
+                config_path = os.path.join(config_root, spec["config_subdir"], "config.json")
+                if os.path.exists(config_path):
+                    try:
+                        import json
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            providers = (((data.get("claude") or {}).get("providers") or {}).values())
+                            for provider in providers:
+                                env_cfg = ((provider or {}).get("settingsConfig") or {}).get("env") or {}
+                                auth_token = env_cfg.get("ANTHROPIC_AUTH_TOKEN")
+                                if auth_token:
+                                    env_vars["ANTHROPIC_AUTH_TOKEN"] = str(auth_token)
+                                    break
+                    except Exception:
+                        pass
+                
+                new_container = docker_client_or_default().containers.run(
+                    spec["image"],
+                    name=new_container_name,
+                    detach=True,
+                    tty=True,
+                    stdin_open=True,
+                    user=AGENT_RUNTIME_USER,
+                    environment=env_vars,
+                    labels={
+                        MANAGED_LABEL_KEY: MANAGED_LABEL_VALUE,
+                        "hermit.agent_type": agent_type,
+                        "hermit.host_port": str(new_port),
+                        "hermit.service_port": str(SERVICE_PORT),
+                    },
+                    ports={f"{SERVICE_PORT}/tcp": new_port},
+                    volumes=volumes,
+                    restart_policy={"Name": "unless-stopped"},
+                    log_config=log_config,
+                    network="hermit-claw_openclaw-network",
+                    extra_hosts=["host.docker.internal:host-gateway"],
+                )
+                
+                add_frpc_rule(new_port)
+                scp_rules_to_container(new_container_name, "/home/agent/.claude/workspace/project")
+                
+                return jsonify({
+                    "ok": True, 
+                    "action": "fork",
+                    "original_container": original_name,
+                    "new_container": new_container_name,
+                    "new_port": new_port
+                })
+            
             labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
             agent_type = labels.get("hermit.agent_type", "")
             if agent_type in ("claude", "ollama"):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
-            cmd = f"cd {project_path} && git -c safe.directory=* checkout {commit_hash} 2>&1 && sleep 5"
+            
+            # 根据 hard_mode 决定使用 checkout 还是 reset --hard
+            if hard_mode:
+                cmd = f"cd {project_path} && git -c safe.directory=* reset --hard {commit_hash} 2>&1 && sleep 5"
+            else:
+                cmd = f"cd {project_path} && git -c safe.directory=* checkout {commit_hash} 2>&1 && sleep 5"
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
             payload = recreate_agent(name)
@@ -923,7 +1053,7 @@ def create_app(docker_client=None):
                 scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
             else:
                 scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
-            return jsonify({"ok": True, "container_name": name, "commit_hash": commit_hash, "git_output": output, "new_container": payload["container_name"]})
+            return jsonify({"ok": True, "container_name": name, "commit_hash": commit_hash, "hard_mode": hard_mode, "git_output": output, "new_container": payload["container_name"]})
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         except PermissionError as e:
@@ -1228,6 +1358,9 @@ def create_app(docker_client=None):
                   <select class="git-select" data-action="git-select" style="display:none;padding:2px 4px;font-size:11px;max-width:200px;">
                     <option value="">加载中...</option>
                   </select>
+                  <label class="hard-label" style="display:none;cursor:pointer;font-size:11px;color:#FFC048;white-space:nowrap;">
+                    <input type="checkbox" class="hard-checkbox" style="vertical-align:middle;" /> --hard
+                  </label>
                 </div>
                 <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
@@ -1330,6 +1463,13 @@ def create_app(docker_client=None):
               return;
             }}
             gitSelect.innerHTML = '<option value="">选择版本...</option>';
+            // 添加 FORK 选项在第一条
+            const forkOpt = document.createElement("option");
+            forkOpt.value = "****FORK****";
+            forkOpt.textContent = "****FORK****";
+            forkOpt.style.color = "#FF9800";
+            forkOpt.style.fontWeight = "bold";
+            gitSelect.appendChild(forkOpt);
             (d.commits || []).forEach(c => {{
               const opt = document.createElement("option");
               opt.value = c.hash;
@@ -1344,9 +1484,11 @@ def create_app(docker_client=None):
         cardTitle.onclick = () => {{
           if (gitSelect.style.display === "none") {{
             gitSelect.style.display = "inline-block";
+            document.querySelector(".hard-label").style.display = "inline-block";
             if (gitSelect.options.length <= 1) loadGitCommits();
           }} else {{
             gitSelect.style.display = "none";
+            document.querySelector(".hard-label").style.display = "none";
           }}
         }};
         
@@ -1355,18 +1497,25 @@ def create_app(docker_client=None):
           if (!hash) return;
           if (!managed) return;
           gitSelect.style.display = "none";
-          logBox.textContent += `\n[git checkout ${{hash.substring(0,7)}}] 执行中...\n`;
+          document.querySelector(".hard-label").style.display = "none";
+          const isHard = div.querySelector(".hard-checkbox").checked;
+          const cmdType = isHard ? "git reset --hard" : "git checkout";
+          logBox.textContent += `\n[${{cmdType}} ${{hash.substring(0,7)}}] 执行中...\n`;
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ commit_hash: hash }}),
+            body: JSON.stringify({{ commit_hash: hash, hard_mode: isHard }}),
           }});
           const d = await r.json();
           if (!r.ok) {{
             logBox.textContent += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
             return;
           }}
-          logBox.textContent += `[git checkout 完成] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
+          if (d.action === "fork") {{
+            logBox.textContent += `[FORK 完成] 从 ${{d.original_container}} 创建了 ${{d.new_container}}\n`;
+          }} else {{
+            logBox.textContent += `[${{cmdType}} 完成] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
+          }}
           await refreshCards();
         }};
         
