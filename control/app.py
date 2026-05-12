@@ -1179,19 +1179,12 @@ def create_app(docker_client=None):
         color: #2196F3;
         font-size: 11px;
       }}
-      .git-reset-label input[type="checkbox"] {
-        margin: 0;
-        padding: 0;
-        width: auto;
-        height: auto;
-        line-height: 1;
-        vertical-align: middle;
-        flex-shrink: 0;
-      }
-      .git-reset-label span {
-        line-height: 1;
-        vertical-align: middle;
-      }
+      .git-reset-label input[type="checkbox"] {{
+        margin: 0; padding: 0; width: auto; height: auto; line-height: 1; vertical-align: middle; flex-shrink: 0;
+      }}
+      .git-reset-label span {{
+        line-height: 1; vertical-align: middle;
+      }}
       .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
       .cmd-bar {{
         display: flex;
