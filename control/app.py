@@ -655,22 +655,45 @@ def create_app(docker_client=None):
             user_message = data.get("message", "").strip()
             if not user_message:
                 return jsonify({"error": "message is required"})
-            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在/config Use Skill: user-rules 里面"
+            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 config/ 目录（Use Skill: user-rules）里面"
             full_message = f"{system_prompt}\n\n{user_message}"
             log_file = "/logs/hermit/debug.log"
-            import tempfile, os
-            tmp_file = tempfile.mktemp(suffix=".txt")
+            import tempfile, os, json
+            tmp_file = tempfile.mktemp(suffix=".txt", dir="/app")
             with open(tmp_file, "w", encoding="utf-8") as f:
                 f.write(full_message)
+            
+            # 尝试从 config.json 提取 API Key
+            env = os.environ.copy()
+            config_path = "/config/claude/config.json"
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        cfg_data = json.load(f)
+                        providers = (cfg_data.get("claude", {}).get("providers", {}).values())
+                        for provider in providers:
+                            env_cfg = provider.get("settingsConfig", {}).get("env", {})
+                            auth_token = env_cfg.get("ANTHROPIC_AUTH_TOKEN")
+                            if auth_token:
+                                env["ANTHROPIC_API_KEY"] = str(auth_token)
+                                break
+                except Exception as e:
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(f"Error loading config.json: {str(e)}\n")
+
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n=== {now_iso()} ===\n")
                 f.write(f"User message: {user_message}\n")
                 f.write(f"Full message:\n{full_message}\n")
                 f.write(f"Temp file: {tmp_file}\n")
+                f.write(f"API Key present: {'Yes' if 'ANTHROPIC_API_KEY' in env else 'No'}\n")
+
             import subprocess
+            # 移除 --dangerously-skip-permissions，确保在 root 下也能运行（如果配置了 config.json）
             result = subprocess.run(
                 ["claude", "--continue", "-p", tmp_file],
-                capture_output=True, text=True, timeout=120
+                capture_output=True, text=True, timeout=120,
+                env=env
             )
             os.unlink(tmp_file)
             output = result.stdout
@@ -835,35 +858,39 @@ def create_app(docker_client=None):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
-            cmd = 'cd ' + project_path + ' && CURRENT=$(git rev-parse --short HEAD 2>/dev/null); git log --format="$CURRENT %h %ad %s" --date=short -20 2>/dev/null || echo "not-a-git-repo"'
+            cmd = f'cd {project_path} && git -c safe.directory=* rev-parse --short HEAD && git -c safe.directory=* log --format="%h %ad %s" --date=short -20'
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
+            
             debug_log = "/logs/hermit/debug.log"
             with open(debug_log, "a", encoding="utf-8") as f:
                 f.write(f"\n=== GIT COMMITS DEBUG ===\n")
                 f.write(f"container: {name}\n")
-                f.write(f"project_path: {project_path}\n")
-                f.write(f"agent_type: {agent_type}\n")
                 f.write(f"cmd: {cmd}\n")
                 f.write(f"exit_code: {result.exit_code}\n")
                 f.write(f"output:\n{output}\n")
-            if "not-a-git-repo" in output:
+
+            if result.exit_code != 0:
                 return jsonify({"error": "项目不是 git 仓库"})
-            commits = []
+            
             lines = output.split("\n")
-            if lines:
-                first_line = lines[0]
-                parts = first_line.split(" ", 1)
-                if len(parts) >= 1:
-                    current_commit = parts[0] if parts[0] else ""
-            else:
-                current_commit = ""
-            for line in lines:
+            current_commit = lines[0].strip()
+            log_lines = lines[1:]
+            
+            commits = []
+            for line in log_lines:
                 if line.strip() and len(line) >= 10:
-                    commit_hash = line.substring(0, 7)
-                    message = line.substring(8)
-                    is_current = "✓" if commit_hash == current_commit else ""
-                    commits.append({"hash": commit_hash, "message": message, "is_current": is_current})
+                    parts = line.split(" ", 2)
+                    if len(parts) >= 2:
+                        commit_hash = parts[0]
+                        date_str = parts[1]
+                        message = parts[2] if len(parts) > 2 else ""
+                        is_current = "✓" if commit_hash == current_commit else ""
+                        commits.append({
+                            "hash": commit_hash, 
+                            "message": f"[{date_str}] {message}", 
+                            "is_current": is_current
+                        })
             return jsonify({"commits": commits})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
@@ -886,7 +913,7 @@ def create_app(docker_client=None):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
-            cmd = f"cd {project_path} && git checkout {commit_hash} 2>&1 && sleep 5"
+            cmd = f"cd {project_path} && git -c safe.directory=* checkout {commit_hash} 2>&1 && sleep 5"
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
             payload = recreate_agent(name)
