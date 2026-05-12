@@ -1174,7 +1174,21 @@ def create_app(docker_client=None):
         box.style.cssText = "background:#1a1a2e;border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:24px;max-width:700px;width:90%;max-height:80vh;display:flex;flex-direction:column;";
         const header = document.createElement("div");
         header.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;";
-        header.innerHTML = `<span style="font-size:18px;font-weight:bold;color:#fff;">${title}</span><button id="copyBtn" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">复制</button>`;
+        const titleSpan = document.createElement("span");
+        titleSpan.style.cssText = "font-size:18px;font-weight:bold;color:#fff;";
+        titleSpan.textContent = title;
+        const copyBtn = document.createElement("button");
+        copyBtn.style.cssText = "padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;";
+        copyBtn.textContent = "复制";
+        copyBtn.onclick = () => {{
+          navigator.clipboard.writeText(content).then(() => {{
+            copyBtn.textContent = "已复制!";
+            copyBtn.style.background = "#666";
+            setTimeout(() => {{ copyBtn.textContent = "复制"; copyBtn.style.background = "#3AE374"; }}, 1500);
+          }});
+        }};
+        header.appendChild(titleSpan);
+        header.appendChild(copyBtn);
         const contentDiv = document.createElement("div");
         contentDiv.style.cssText = "flex:1;overflow:auto;padding:16px;background:#0d0d1a;border-radius:8px;border:1px solid rgba(255,255,255,0.1);white-space:pre-wrap;word-break:break-word;max-height:60vh;font-size:13px;line-height:1.5;color:#e0e0e0;";
         contentDiv.textContent = content;
@@ -1182,14 +1196,6 @@ def create_app(docker_client=None):
         box.appendChild(contentDiv);
         overlay.appendChild(box);
         document.body.appendChild(overlay);
-        document.getElementById("copyBtn").onclick = () => {{
-          navigator.clipboard.writeText(content).then(() => {{
-            const btn = document.getElementById("copyBtn");
-            btn.textContent = "已复制!";
-            btn.style.background = "#666";
-            setTimeout(() => {{ btn.textContent = "复制"; btn.style.background = "#3AE374"; }}, 1500);
-          }});
-        }};
         overlay.onclick = (e) => {{ if (e.target === overlay) overlay.remove(); }};
       }};
 
