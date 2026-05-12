@@ -831,7 +831,7 @@ def create_app(docker_client=None):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
-            cmd = f"cd {project_path} && git reset --hard {commit_hash} 2>&1 && sleep 5"
+            cmd = f"cd {project_path} && git checkout {commit_hash} 2>&1 && sleep 5"
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
             payload = recreate_agent(name)
@@ -1191,7 +1191,7 @@ def create_app(docker_client=None):
           const hash = gitSelect.value;
           if (!hash) return;
           if (!managed) return;
-          logBox.textContent += `\n[git reset --hard ${{hash.substring(0,7)}}] 执行中...\n`;
+          logBox.textContent += `\n[git checkout ${{hash.substring(0,7)}}] 执行中...\n`;
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
@@ -1202,7 +1202,7 @@ def create_app(docker_client=None):
             logBox.textContent += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
             return;
           }}
-          logBox.textContent += `[git reset 完成] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
+          logBox.textContent += `[git checkout 完成] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
           await refreshCards();
         }};
         
