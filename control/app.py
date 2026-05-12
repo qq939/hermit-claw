@@ -256,6 +256,7 @@ def create_app(docker_client=None):
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
             f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
@@ -385,6 +386,7 @@ def create_app(docker_client=None):
         volumes = {
             f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
             f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
