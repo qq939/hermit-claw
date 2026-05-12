@@ -1169,21 +1169,45 @@ def create_app(docker_client=None):
       .git-tools {{
         display: none;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         flex-wrap: wrap;
+        margin-left: 0;
       }}
       .git-reset-label {{
         display: inline-flex;
         align-items: center;
-        gap: 4px;
+        gap: 0;
         color: #2196F3;
         font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
       }}
       .git-reset-label input[type="checkbox"] {{
-        margin: 0; padding: 0; width: auto; height: auto; line-height: 1; vertical-align: middle; flex-shrink: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        margin: 0;
+        padding: 0;
+        width: 13px;
+        height: 13px;
+        border: 1.5px solid #2196F3;
+        border-radius: 3px;
+        background: transparent;
+        flex: none;
+        cursor: pointer;
+        vertical-align: middle;
+        position: relative;
+        top: 0;
+      }}
+      .git-reset-label input[type="checkbox"]:checked {{
+        background: #2196F3;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M6.5 11.8L2.9 8.2l1.4-1.4L6.5 9l5.2-5.2L13 5.2z'/%3E%3C/svg%3E");
+        background-size: contain;
       }}
       .git-reset-label span {{
-        line-height: 1; vertical-align: middle;
+        padding-left: 4px;
+        font-size: 11px;
+        line-height: 1;
       }}
       .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
       .cmd-bar {{
