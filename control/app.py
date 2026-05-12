@@ -788,6 +788,68 @@ def create_app(docker_client=None):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.get("/api/agents/<path:name>/git-commits")
+    def api_git_commits(name):
+        try:
+            container = _require_managed(name)
+            labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
+            if agent_type in ("claude", "ollama"):
+                project_path = "/home/agent/.claude/workspace/project"
+            else:
+                project_path = "/home/agent/.openclaw/workspace/project"
+            cmd = f"cd {project_path} && git log --oneline -20 2>/dev/null || echo 'not-a-git-repo'"
+            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
+            output = result.output.decode("utf-8", errors="replace").strip()
+            if "not-a-git-repo" in output:
+                return jsonify({"error": "项目不是 git 仓库"})
+            commits = []
+            for line in output.split("\n"):
+                if line.strip():
+                    parts = line.split(" ", 1)
+                    if len(parts) >= 2:
+                        commits.append({"hash": parts[0], "message": parts[1]})
+            return jsonify({"commits": commits})
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.post("/api/agents/<path:name>/git-reset")
+    def api_git_reset(name):
+        try:
+            container = _require_managed(name)
+            data = request.get_json() or {}
+            commit_hash = data.get("commit_hash", "")
+            if not commit_hash:
+                return jsonify({"error": "commit_hash is required"}), 400
+            labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+            agent_type = labels.get("hermit.agent_type", "")
+            if agent_type in ("claude", "ollama"):
+                project_path = "/home/agent/.claude/workspace/project"
+            else:
+                project_path = "/home/agent/.openclaw/workspace/project"
+            cmd = f"cd {project_path} && git reset --hard {commit_hash} 2>&1 && sleep 5"
+            result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
+            output = result.output.decode("utf-8", errors="replace").strip()
+            payload = recreate_agent(name)
+            add_frpc_rule(payload["host_port"])
+            if agent_type in ("claude", "ollama"):
+                scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
+            else:
+                scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
+            return jsonify({"ok": True, "container_name": name, "commit_hash": commit_hash, "git_output": output, "new_container": payload["container_name"]})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.post("/api/agents/<path:name>/recreate")
     def api_recreate_agent(name):
         try:
@@ -1020,6 +1082,9 @@ def create_app(docker_client=None):
           <div class="actions">
             <button data-action="ssh">SSH终端</button>
             <button data-action="refresh">刷新日志</button>
+            <select data-action="git-select" style="padding:4px 8px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">
+              <option value="">Git 版本</option>
+            </select>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
             <button data-action="cleanup-context">清理上下文</button>
@@ -1100,6 +1165,47 @@ def create_app(docker_client=None):
           const d = await r.json();
           logBox.textContent += `\n(上下文已清理) ${{d.output || ""}}\n`;
         }};
+        
+        const gitSelect = div.querySelector('select[data-action="git-select"]');
+        const loadGitCommits = async () => {{
+          try {{
+            const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-commits`);
+            const d = await r.json();
+            if (d.error) {{
+              console.log("Git commits error:", d.error);
+              return;
+            }}
+            gitSelect.innerHTML = '<option value="">Git 版本</option>';
+            (d.commits || []).forEach(c => {{
+              const opt = document.createElement("option");
+              opt.value = c.hash;
+              opt.textContent = c.hash.substring(0,7) + " " + c.message;
+              gitSelect.appendChild(opt);
+            }});
+          }} catch(e) {{
+            console.error("Failed to load git commits:", e);
+          }}
+        }};
+        loadGitCommits();
+        gitSelect.onchange = async () => {{
+          const hash = gitSelect.value;
+          if (!hash) return;
+          if (!managed) return;
+          logBox.textContent += `\n[git reset --hard ${{hash.substring(0,7)}}] 执行中...\n`;
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ commit_hash: hash }}),
+          }});
+          const d = await r.json();
+          if (!r.ok) {{
+            logBox.textContent += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+            return;
+          }}
+          logBox.textContent += `[git reset 完成] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
+          await refreshCards();
+        }};
+        
         div.querySelector('button[data-action="send"]').onclick = () => sendMessage();
         
         const cardKey = `card_${{item.container_name}}`;
