@@ -657,12 +657,22 @@ def create_app(docker_client=None):
                 return jsonify({"error": "message is required"})
             system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在/config Use Skill: user-rules 里面"
             full_message = f"{system_prompt}\n\n{user_message}"
+            log_file = "/logs/debug.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {now_iso()} ===\n")
+                f.write(f"User message: {user_message}\n")
+                f.write(f"Full message:\n{full_message}\n")
             import subprocess
             result = subprocess.run(
                 ["node", "-e", f"const m=require('child_process');const c=m.spawn('claude',['--dangerously-skip-permissions','--continue','--print'],{{stdio:['pipe','pipe','pipe'],shell:true,env:{{...process.env,ANTHROPIC_DISABLE_PREFLIGHT:'1'}}}});c.stdin.end(Buffer.from('{full_message.replace(chr(39), chr(39)+chr(39))}','base64').toString('utf8'));let out='';c.stdout.on('data',d=>{{out+=d.toString()}});c.stderr.on('data',d=>{{console.error(d.toString())}});c.on('close',code=>{{console.log('__EXIT__'+code)}});"],
                 capture_output=True, text=True, timeout=120
             )
             output = result.stdout
+            stderr = result.stderr
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"Return code: {result.returncode}\n")
+                f.write(f"STDOUT:\n{output}\n")
+                f.write(f"STDERR:\n{stderr}\n")
             if "__EXIT__" in output:
                 output = output[:output.index("__EXIT__")].strip()
             return jsonify({"response": output or "(无输出)"})

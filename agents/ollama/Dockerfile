@@ -29,8 +29,7 @@ RUN bash -c ' \
     done \
 '
 
-
-COPY run_claude.js /home/agent/.claude/run_claude.js
+COPY agents/ollama/run_claude.js /home/agent/.claude/run_claude.js
 
 RUN bash -c ' \
     useradd -m -s /bin/bash -u 501 -g 20 agent; \

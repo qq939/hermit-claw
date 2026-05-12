@@ -12,8 +12,7 @@ RUN for i in 1 2 3 4 5; do \
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
-
-COPY run_claude.js /home/agent/.claude/run_claude.js
+COPY agents/claude/run_claude.js /home/agent/.claude/run_claude.js
 
 RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && echo "agent:agent" | chpasswd \

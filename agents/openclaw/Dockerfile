@@ -31,6 +31,7 @@ RUN bash -c ' \
     done \
 '
 
+
 USER agent
 WORKDIR /home/agent/.openclaw/workspace/project
 EXPOSE 8082
