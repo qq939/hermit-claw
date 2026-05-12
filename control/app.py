@@ -648,6 +648,29 @@ def create_app(docker_client=None):
     def api_agent_types():
         return jsonify({"items": [{"value": k, "label": k} for k in AGENT_SPECS]})
 
+    @app.post("/api/claude-ask")
+    def api_claude_ask():
+        try:
+            data = request.get_json() or {}
+            user_message = data.get("message", "").strip()
+            if not user_message:
+                return jsonify({"error": "message is required"})
+            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在/config Use Skill: user-rules 里面"
+            full_message = f"{system_prompt}\n\n{user_message}"
+            import subprocess
+            result = subprocess.run(
+                ["node", "-e", f"const m=require('child_process');const c=m.spawn('claude',['--dangerously-skip-permissions','--continue','--print'],{{stdio:['pipe','pipe','pipe'],shell:true,env:{{...process.env,ANTHROPIC_DISABLE_PREFLIGHT:'1'}}}});c.stdin.end(Buffer.from('{full_message.replace(chr(39), chr(39)+chr(39))}','base64').toString('utf8'));let out='';c.stdout.on('data',d=>{{out+=d.toString()}});c.stderr.on('data',d=>{{console.error(d.toString())}});c.on('close',code=>{{console.log('__EXIT__'+code)}});"],
+                capture_output=True, text=True, timeout=120
+            )
+            output = result.stdout
+            if "__EXIT__" in output:
+                output = output[:output.index("__EXIT__")].strip()
+            return jsonify({"response": output or "(无输出)"})
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "请求超时（120秒）"})
+        except Exception as e:
+            return jsonify({"error": str(e)})
+
     @app.get("/api/agents")
     def api_agents():
         try:
@@ -1034,7 +1057,13 @@ def create_app(docker_client=None):
   <body>
     <header>
       <div class="wrap">
-        <h1>容器控制端 18080</h1>
+        <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;">
+          <h1 style="margin:0;">HERMIT</h1>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input id="claudeQuery" placeholder="问个问题..." style="padding:6px 12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;width:300px;" />
+            <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
+          </div>
+        </div>
         <div class="sub">创建类型：claude / openclaw@2026.2.9；端口从 18081 递增，容器名格式：端口号-容器名称。</div>
         <div class="panel">
           <div class="row">
@@ -1055,7 +1084,37 @@ def create_app(docker_client=None):
       const agentName = document.getElementById("agentName");
       const createBtn = document.getElementById("createBtn");
       const notice = document.getElementById("notice");
+      const claudeQuery = document.getElementById("claudeQuery");
+      const claudeAsk = document.getElementById("claudeAsk");
       const tail = 20;
+
+      claudeAsk.onclick = async () => {{
+        const q = claudeQuery.value.trim();
+        if (!q) return;
+        claudeAsk.disabled = true;
+        claudeAsk.textContent = "处理中...";
+        try {{
+          const res = await fetch("/api/claude-ask", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ message: q }}),
+          }});
+          const data = await res.json();
+          if (data.error) {{
+            alert("错误: " + data.error);
+          }} else {{
+            alert(data.response);
+          }}
+        }} catch(e) {{
+          alert("请求失败: " + e.message);
+        }} finally {{
+          claudeAsk.disabled = false;
+          claudeAsk.textContent = "询问";
+        }}
+      }};
+      claudeQuery.onkeydown = (e) => {{
+        if (e.key === "Enter") claudeAsk.click();
+      }};
 
       async function loadTypes() {{
         const res = await fetch("/api/agent-types", {{ cache: "no-store" }});
