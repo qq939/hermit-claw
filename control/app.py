@@ -798,17 +798,26 @@ def create_app(docker_client=None):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
-            cmd = f"cd {project_path} && git log --oneline -20 2>/dev/null || echo 'not-a-git-repo'"
+            cmd = 'cd ' + project_path + ' && CURRENT=$(git rev-parse --short HEAD 2>/dev/null); git log --format="$CURRENT %h %ad %s" --date=short -20 2>/dev/null || echo "not-a-git-repo"'
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
             if "not-a-git-repo" in output:
                 return jsonify({"error": "项目不是 git 仓库"})
             commits = []
-            for line in output.split("\n"):
-                if line.strip():
-                    parts = line.split(" ", 1)
-                    if len(parts) >= 2:
-                        commits.append({"hash": parts[0], "message": parts[1]})
+            lines = output.split("\n")
+            if lines:
+                first_line = lines[0]
+                parts = first_line.split(" ", 1)
+                if len(parts) >= 1:
+                    current_commit = parts[0] if parts[0] else ""
+            else:
+                current_commit = ""
+            for line in lines:
+                if line.strip() and len(line) >= 10:
+                    commit_hash = line.substring(0, 7)
+                    message = line.substring(8)
+                    is_current = "✓" if commit_hash == current_commit else ""
+                    commits.append({"hash": commit_hash, "message": message, "is_current": is_current})
             return jsonify({"commits": commits})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
@@ -1071,8 +1080,13 @@ def create_app(docker_client=None):
           <div class="card-head">
             <div style="display:flex;align-items:center;gap:8px;">
               <button class="collapse-btn" data-action="collapse">▶</button>
-              <div>
-                <div>${{item.container_name}}</div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="card-title" data-action="git-dropdown" style="cursor:pointer;color:#2196F3;font-weight:500;">${{item.container_name}}</span>
+                  <select class="git-select" data-action="git-select" style="display:none;padding:2px 4px;font-size:11px;max-width:200px;">
+                    <option value="">加载中...</option>
+                  </select>
+                </div>
                 <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
             </div>
@@ -1082,9 +1096,6 @@ def create_app(docker_client=None):
           <div class="actions">
             <button data-action="ssh">SSH终端</button>
             <button data-action="refresh">刷新日志</button>
-            <select data-action="git-select" style="padding:4px 8px; background:#f0f0f0; border:1px solid #ccc; border-radius:4px; cursor:pointer;">
-              <option value="">Git 版本</option>
-            </select>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
             <button data-action="cleanup-context">清理上下文</button>
@@ -1166,31 +1177,42 @@ def create_app(docker_client=None):
           logBox.textContent += `\n(上下文已清理) ${{d.output || ""}}\n`;
         }};
         
-        const gitSelect = div.querySelector('select[data-action="git-select"]');
+        const cardTitle = div.querySelector('.card-title');
+        const gitSelect = div.querySelector('.git-select');
         const loadGitCommits = async () => {{
           try {{
             const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-commits`);
             const d = await r.json();
             if (d.error) {{
-              console.log("Git commits error:", d.error);
+              gitSelect.innerHTML = '<option value="">非Git项目</option>';
               return;
             }}
-            gitSelect.innerHTML = '<option value="">Git 版本</option>';
+            gitSelect.innerHTML = '<option value="">选择版本...</option>';
             (d.commits || []).forEach(c => {{
               const opt = document.createElement("option");
               opt.value = c.hash;
-              opt.textContent = c.hash.substring(0,7) + " " + c.message;
+              opt.textContent = (c.is_current ? "✓ " : "") + c.message;
               gitSelect.appendChild(opt);
             }});
           }} catch(e) {{
             console.error("Failed to load git commits:", e);
           }}
         }};
-        loadGitCommits();
+        
+        cardTitle.onclick = () => {{
+          if (gitSelect.style.display === "none") {{
+            gitSelect.style.display = "inline-block";
+            if (gitSelect.options.length <= 1) loadGitCommits();
+          }} else {{
+            gitSelect.style.display = "none";
+          }}
+        }};
+        
         gitSelect.onchange = async () => {{
           const hash = gitSelect.value;
           if (!hash) return;
           if (!managed) return;
+          gitSelect.style.display = "none";
           logBox.textContent += `\n[git checkout ${{hash.substring(0,7)}}] 执行中...\n`;
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
