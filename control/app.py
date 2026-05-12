@@ -1173,43 +1173,6 @@ def create_app(docker_client=None):
         flex-wrap: wrap;
         margin-left: 0;
       }}
-      .git-reset-label {{
-        display: inline-flex;
-        align-items: center;
-        gap: 0;
-        width: auto;
-        flex: none;
-        color: #2196F3;
-        font-size: 11px;
-        cursor: pointer;
-        white-space: nowrap;
-      }}
-      .git-reset-label input[type="checkbox"] {{
-        appearance: none;
-        -webkit-appearance: none;
-        -moz-appearance: none;
-        margin: 0;
-        padding: 0;
-        width: 13px;
-        height: 13px;
-        flex: none;
-        align-self: center;
-        border: 1.5px solid #2196F3;
-        border-radius: 3px;
-        background: transparent;
-        cursor: pointer;
-        vertical-align: middle;
-      }}
-      .git-reset-label input[type="checkbox"]:checked {{
-        background: #2196F3;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M6.5 11.8L2.9 8.2l1.4-1.4L6.5 9l5.2-5.2L13 5.2z'/%3E%3C/svg%3E");
-        background-size: contain;
-      }}
-      .git-reset-label span {{
-        padding-left: 4px;
-        font-size: 11px;
-        line-height: 1;
-      }}
       .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
       .cmd-bar {{
         display: flex;
@@ -1360,10 +1323,10 @@ def create_app(docker_client=None):
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="card-title" data-action="git-dropdown" style="cursor:pointer;color:#2196F3;font-weight:500;">${{item.container_name}}</span>
                   <div class="git-tools">
-                    <label class="git-reset-label">
-                      <input type="checkbox" class="git-hard-toggle" />
-                      <span>git reset hard</span>
-                    </label>
+                    <select class="git-mode-select" data-action="git-mode" style="padding:2px 4px;font-size:11px;max-width:120px;">
+                      <option value="checkout">git checkout</option>
+                      <option value="reset-hard">git reset --hard</option>
+                    </select>
                     <select class="git-select" data-action="git-select" style="padding:2px 4px;font-size:11px;max-width:220px;">
                       <option value="">加载中...</option>
                     </select>
@@ -1462,7 +1425,7 @@ def create_app(docker_client=None):
         const cardTitle = div.querySelector('.card-title');
         const gitSelect = div.querySelector('.git-select');
         const gitTools = div.querySelector('.git-tools');
-        const gitHardToggle = div.querySelector('.git-hard-toggle');
+        const gitModeSelect = div.querySelector('.git-mode-select');
         const loadGitCommits = async () => {{
           try {{
             const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-commits`);
@@ -1497,14 +1460,14 @@ def create_app(docker_client=None):
           if (!hash) return;
           gitTools.style.display = "none";
           const isFork = hash === "__FORK__";
-          const useHardReset = !!gitHardToggle.checked;
-          const opLabel = isFork ? "fork" : (useHardReset ? "git reset --hard" : "git checkout");
+          const gitMode = gitModeSelect ? gitModeSelect.value : "checkout";
+          const opLabel = isFork ? "fork" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout");
           const targetLabel = isFork ? item.container_name : hash.substring(0,7);
           logBox.textContent += `\n[${{opLabel}} ${{targetLabel}}] 执行中...\n`;
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ commit_hash: hash, hard: useHardReset }}),
+            body: JSON.stringify({{ commit_hash: hash, hard: gitMode === "reset-hard" }}),
           }});
           const d = await r.json();
           if (!r.ok) {{
@@ -1518,7 +1481,6 @@ def create_app(docker_client=None):
             const doneLabel = d.mode === "hard_reset" ? "git reset --hard 完成" : "git checkout 完成";
             logBox.textContent += `[${{doneLabel}}] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
           }}
-          gitHardToggle.checked = false;
           gitSelect.value = "";
           await refreshCards();
         }};
