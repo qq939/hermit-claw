@@ -1179,6 +1179,10 @@ def create_app(docker_client=None):
         color: #2196F3;
         font-size: 11px;
       }}
+      .git-reset-label input {{
+        margin: 0;
+        vertical-align: middle;
+      }}
       .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
       .cmd-bar {{
         display: flex;
