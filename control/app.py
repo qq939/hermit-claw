@@ -1355,10 +1355,10 @@ def create_app(docker_client=None):
               <div style="display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="card-title" data-action="git-dropdown" style="cursor:pointer;color:#2196F3;font-weight:500;">${{item.container_name}}</span>
-                  <select class="git-select" data-action="git-select" style="display:none;padding:2px 4px;font-size:11px;max-width:200px;">
+                  <select class="git-select" data-action="git-select" style="display:none;padding:2px 4px;font-size:11px;max-width:180px;">
                     <option value="">加载中...</option>
                   </select>
-                  <label class="hard-label" style="display:none;cursor:pointer;font-size:11px;color:#FFC048;white-space:nowrap;">
+                  <label class="hard-label" style="display:none;cursor:pointer;font-size:11px;color:#2196F3;white-space:nowrap;margin-left:4px;">
                     <input type="checkbox" class="hard-checkbox" style="vertical-align:middle;" /> --hard
                   </label>
                 </div>
