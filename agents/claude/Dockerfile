@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim
 RUN for i in 1 2 3 4 5; do \
         apt-get update && break || { rm -rf /var/lib/apt/lists/*; apt-get update; } \
     done \
-    && apt-get install -y --no-install-recommends ca-certificates sudo git coreutils openssh-server fonts-noto-cjk curl \
+    && apt-get install -y --no-install-recommends ca-certificates sudo git coreutils openssh-server fonts-noto-cjk curl python3 python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/run/sshd \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config \

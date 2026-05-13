@@ -3,7 +3,7 @@ FROM node:22-bookworm-slim
 RUN bash -c ' \
     for attempt in 1 2 3; do \
         set +e; \
-        apt-get update && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server fonts-noto-cjk && break; \
+        apt-get update && apt-get install -y --no-install-recommends ca-certificates sudo curl git coreutils openssh-server fonts-noto-cjk python3 python3-pip && break; \
         sleep 10; \
     done; \
     rm -rf /var/lib/apt/lists/*; \
