@@ -40,6 +40,7 @@ AGENT_RUNTIME_USER = "agent"
 HOST_CONFIG_ROOT_ENV = "HOST_CONFIG_ROOT"
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
 HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
+PUBLIC_PREVIEW_BASE_URL_ENV = "PUBLIC_PREVIEW_BASE_URL"
 
 
 def now_iso():
@@ -52,6 +53,7 @@ def create_app(docker_client=None):
     app.config["DOCKER_CLIENT"] = docker_client
     app.config["CONFIG_ROOT"] = "/config"
     app.config["WORKSPACES_ROOT"] = "/workspaces"
+    app.config["PUBLIC_PREVIEW_BASE_URL"] = (os.environ.get(PUBLIC_PREVIEW_BASE_URL_ENV) or "http://dimond.top").rstrip("/")
     app.config["HOST_CONFIG_ROOT"] = os.environ.get(HOST_CONFIG_ROOT_ENV) or app.config["CONFIG_ROOT"]
     # 容器内将 host.docker.internal 替换为宿主机实际路径（如果是相对路径 ./config）
     host_cfg = app.config["HOST_CONFIG_ROOT"]
@@ -250,7 +252,7 @@ def create_app(docker_client=None):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"Target workspace already exists: {dst_dir}")
-        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=False)
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=False, symlinks=True)
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
@@ -497,11 +499,13 @@ def create_app(docker_client=None):
         base_name = derive_agent_basename(container.name)
         new_container_name = f"{new_host_port}-{base_name}"
 
-        host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
-        host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
-        src_workspace = os.path.join(host_workspaces_root, container.name)
-        dst_workspace = os.path.join(host_workspaces_root, new_container_name)
-        dst_logs = os.path.join(host_logs_root, new_container_name)
+        # Copying runs inside the control container, so use the mounted in-container
+        # paths. Docker bind mounts still use HOST_* paths in create_agent().
+        workspaces_root = app.config["WORKSPACES_ROOT"]
+        logs_root = "/logs"
+        src_workspace = os.path.join(workspaces_root, container.name)
+        dst_workspace = os.path.join(workspaces_root, new_container_name)
+        dst_logs = os.path.join(logs_root, new_container_name)
 
         created_name = None
         try:
@@ -1093,7 +1097,9 @@ def create_app(docker_client=None):
 
     @app.get("/")
     def index():
+        import json
         poll_ms = 5000
+        preview_base_url = json.dumps(app.config["PUBLIC_PREVIEW_BASE_URL"])
         html = f"""<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -1310,9 +1316,8 @@ def create_app(docker_client=None):
       }};
 
       function previewUrl(port) {{
-        const protocol = location.protocol || "http:";
-        const hostname = location.hostname || "localhost";
-        return `${{protocol}}//${{hostname}}:${{port}}`;
+        const base = {preview_base_url};
+        return `${{base}}:${{port}}`;
       }}
 
       function renderStatus(status, port) {{
