@@ -518,7 +518,6 @@ def create_app(docker_client=None):
                 raise RuntimeError(f"Fork expected {new_container_name}, got {created_name}")
 
             add_frpc_rule(payload["host_port"])
-            restart_frpc()
             project_path = project_path_for_agent_type(agent_type)
             import time
             time.sleep(5)
