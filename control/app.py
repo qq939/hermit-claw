@@ -40,7 +40,6 @@ AGENT_RUNTIME_USER = "agent"
 HOST_CONFIG_ROOT_ENV = "HOST_CONFIG_ROOT"
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
 HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
-PUBLIC_PREVIEW_BASE_URL_ENV = "PUBLIC_PREVIEW_BASE_URL"
 
 
 def now_iso():
@@ -53,7 +52,6 @@ def create_app(docker_client=None):
     app.config["DOCKER_CLIENT"] = docker_client
     app.config["CONFIG_ROOT"] = "/config"
     app.config["WORKSPACES_ROOT"] = "/workspaces"
-    app.config["PUBLIC_PREVIEW_BASE_URL"] = (os.environ.get(PUBLIC_PREVIEW_BASE_URL_ENV) or "http://dimond.top").rstrip("/")
     app.config["HOST_CONFIG_ROOT"] = os.environ.get(HOST_CONFIG_ROOT_ENV) or app.config["CONFIG_ROOT"]
     # 容器内将 host.docker.internal 替换为宿主机实际路径（如果是相对路径 ./config）
     host_cfg = app.config["HOST_CONFIG_ROOT"]
@@ -187,7 +185,7 @@ def create_app(docker_client=None):
             print(f"[scp] ERROR: {e}", flush=True, file=sys.stderr)
 
     def find_next_port():
-        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
+        used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
         for port in range(START_HOST_PORT, END_HOST_PORT + 1):
             if port not in used:
                 return port
@@ -197,11 +195,6 @@ def create_app(docker_client=None):
         if agent_type in ("claude", "ollama"):
             return "/home/agent/.claude/workspace/project"
         return "/home/agent/.openclaw/workspace/project"
-
-    def sessions_path_for_agent_type(agent_type):
-        if agent_type in ("claude", "ollama"):
-            return "/home/agent/.claude/projects"
-        return "/home/agent/.openclaw/projects"
 
     def log_path_for_agent_type(agent_type):
         if agent_type in ("claude", "ollama"):
@@ -252,32 +245,14 @@ def create_app(docker_client=None):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"Target workspace already exists: {dst_dir}")
-        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=False, symlinks=True)
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=False)
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
-            for root, dirs, files in os.walk(dst_dir):
-                os.chown(root, 501, 20)
-                for name in dirs:
-                    os.chown(os.path.join(root, name), 501, 20)
-                for name in files:
-                    os.chown(os.path.join(root, name), 501, 20)
+            os.chown(dst_dir, 501, 20)
+            os.chown(sessions_dir, 501, 20)
         except Exception:
             pass
-
-    def volumes_for_agent(agent_type, container_name, host_config_root, host_workspaces_root, host_logs_root, config_subdir):
-        project_bind = project_path_for_agent_type(agent_type)
-        sessions_bind = sessions_path_for_agent_type(agent_type)
-        if agent_type in ("claude", "ollama"):
-            log_bind = "/home/agent/.claude/workspace/project/logs"
-        else:
-            log_bind = "/home/agent/.openclaw/workspace/project/logs"
-        return {
-            f"{host_config_root}/{config_subdir}": {"bind": "/agent-config", "mode": "ro"},
-            f"{host_workspaces_root}/{container_name}": {"bind": project_bind, "mode": "rw"},
-            f"{host_workspaces_root}/{container_name}/sessions": {"bind": sessions_bind, "mode": "rw"},
-            f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
-        }
 
     def create_agent(agent_type, custom_name, body=None):
         if agent_type not in AGENT_SPECS:
@@ -300,7 +275,16 @@ def create_app(docker_client=None):
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
-        volumes = volumes_for_agent(agent_type, container_name, host_config_root, host_workspaces_root, host_logs_root, spec["config_subdir"])
+        if agent_type in ("claude", "ollama"):
+            log_bind = "/home/agent/.claude/workspace/project/logs"
+        else:
+            log_bind = "/home/agent/.openclaw/workspace/project/logs"
+        volumes = {
+            f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
+            f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
+        }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
         env_vars = {}
@@ -422,7 +406,16 @@ def create_app(docker_client=None):
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
-        volumes = volumes_for_agent(agent_type, container_name, host_config_root, host_workspaces_root, host_logs_root, spec["config_subdir"])
+        if agent_type in ("claude", "ollama"):
+            log_bind = "/home/agent/.claude/workspace/project/logs"
+        else:
+            log_bind = "/home/agent/.openclaw/workspace/project/logs"
+        volumes = {
+            f"{host_config_root}/{spec['config_subdir']}": {"bind": "/agent-config", "mode": "ro"},
+            f"{host_workspaces_root}/{container_name}": {"bind": "/home/agent/.claude/workspace/project", "mode": "rw"},
+            f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
+            f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
+        }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)
 
@@ -499,15 +492,12 @@ def create_app(docker_client=None):
         base_name = derive_agent_basename(container.name)
         new_container_name = f"{new_host_port}-{base_name}"
 
-        # Copying runs inside the control container, so use the mounted in-container
-        # paths. Docker bind mounts still use HOST_* paths in create_agent().
-        workspaces_root = app.config["WORKSPACES_ROOT"]
-        logs_root = "/logs"
-        src_workspace = os.path.join(workspaces_root, container.name)
-        dst_workspace = os.path.join(workspaces_root, new_container_name)
-        dst_logs = os.path.join(logs_root, new_container_name)
+        host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
+        host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
+        src_workspace = os.path.join(host_workspaces_root, container.name)
+        dst_workspace = os.path.join(host_workspaces_root, new_container_name)
+        dst_logs = os.path.join(host_logs_root, new_container_name)
 
-        created_name = None
         try:
             _copy_workspace_tree(src_workspace, dst_workspace)
             os.makedirs(dst_logs, exist_ok=True)
@@ -525,17 +515,13 @@ def create_app(docker_client=None):
                 raise RuntimeError(f"Fork expected {new_container_name}, got {created_name}")
 
             add_frpc_rule(payload["host_port"])
+            restart_frpc()
             project_path = project_path_for_agent_type(agent_type)
             import time
             time.sleep(5)
             scp_rules_to_container(payload["container_name"], project_path)
             return payload
         except Exception:
-            if created_name:
-                try:
-                    docker_client_or_default().containers.get(created_name).remove(force=True)
-                except Exception:
-                    pass
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
             raise
@@ -780,7 +766,7 @@ def create_app(docker_client=None):
             # 增加 --add-dir /config 以允许访问配置目录
             result = subprocess.run(
                 ["claude", "--continue", "-p", tmp_file, "--add-dir", "/config"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, timeout=600,
                 env=env
             )
             os.unlink(tmp_file)
@@ -792,7 +778,7 @@ def create_app(docker_client=None):
                 f.write(f"STDERR:\n{stderr}\n")
             return jsonify({"response": output or "(无输出)"})
         except subprocess.TimeoutExpired:
-            return jsonify({"error": "请求超时（120秒）"})
+            return jsonify({"error": "请求超时（10分钟）"})
         except Exception as e:
             return jsonify({"error": str(e)})
 
@@ -1097,9 +1083,7 @@ def create_app(docker_client=None):
 
     @app.get("/")
     def index():
-        import json
         poll_ms = 5000
-        preview_base_url = json.dumps(app.config["PUBLIC_PREVIEW_BASE_URL"])
         html = f"""<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -1314,17 +1298,6 @@ def create_app(docker_client=None):
         document.body.appendChild(overlay);
         overlay.onclick = (e) => {{ if (e.target === overlay) overlay.remove(); }};
       }};
-
-      function previewUrl(port) {{
-        const base = {preview_base_url};
-        return `${{base}}:${{port}}`;
-      }}
-
-      function renderStatus(status, port) {{
-        if (status !== "running" || !port) return status || "unknown";
-        const href = previewUrl(port);
-        return `<a href="${{href}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
-      }}
 
       async function loadTypes() {{
         const res = await fetch("/api/agent-types", {{ cache: "no-store" }});
@@ -1581,17 +1554,19 @@ def create_app(docker_client=None):
             card.dataset.name = item.container_name;
             cards.appendChild(card);
             const stDiv = card.querySelector('.meta[data-status]');
-            if (stDiv) {{
-                stDiv.innerHTML = renderStatus(stDiv.dataset.status, stDiv.dataset.port);
+            if (stDiv && stDiv.dataset.status === 'running') {{
+                const port = stDiv.dataset.port;
+                stDiv.innerHTML = `<a href="http://dimond.top:${{port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
             }}
           }} else {{
             // 只更新状态和原始日志(如果用户还没交互过)
             const st = card.querySelector('.meta[data-status]') || card.querySelector('.meta.status-running, .meta.status-other');
             if (st) {{
                st.className = `meta status-${{item.status === 'running' ? 'running' : 'other'}}`;
-               st.dataset.status = item.status;
-               st.dataset.port = item.host_port || "";
-               st.innerHTML = renderStatus(item.status, item.host_port);
+               st.textContent = item.status;
+               if (item.status === 'running') {{
+                   st.innerHTML = `<a href="http://dimond.top:${{item.host_port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+               }}
             }}
             if (!window.cardStates || !window.cardStates[item.container_name]) {{
                const logBox = card.querySelector('pre');
