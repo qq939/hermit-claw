@@ -351,6 +351,9 @@ def create_app(docker_client=None):
             log_config=log_config,
             network="hermit-claw_openclaw-network",
             extra_hosts=["host.docker.internal:host-gateway"],
+            mem_limit="16g",
+            memswap_limit="16g",
+            shm_size="8g",
         )
 
         if not body.get("skip_initial_message"):
