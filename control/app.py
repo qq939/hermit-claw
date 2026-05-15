@@ -1664,19 +1664,29 @@ def create_app(docker_client=None):
             const cardEls = Array.from(document.querySelectorAll('.card[data-name]'));
             if (!cardEls.length) return;
             
-            cardEls.forEach(c => c.classList.remove('tab-selected'));
+            cardEls.forEach(card => {{
+              if (card !== cardEls[tabIndex]) {{
+                card.classList.add('collapsed');
+                card.classList.remove('tab-selected');
+                const btn = card.querySelector('.collapse-btn');
+                if (btn) btn.textContent = '▶';
+              }}
+            }});
+            
             tabIndex = (tabIndex + 1) % cardEls.length;
             const selected = cardEls[tabIndex];
+            selected.classList.remove('collapsed');
             selected.classList.add('tab-selected');
+            const btn = selected.querySelector('.collapse-btn');
+            if (btn) btn.textContent = '▼';
             
-            if (selected.classList.contains('collapsed')) {{
-              selected.classList.remove('collapsed');
-              const btn = selected.querySelector('.collapse-btn');
-              if (btn) btn.textContent = '▼';
-            }}
-            
-            const msgInput = selected.querySelector('.msg-input');
-            if (msgInput) setTimeout(() => msgInput.focus(), 50);
+            setTimeout(() => {{
+              const msgInput = selected.querySelector('.msg-input');
+              if (msgInput) {{
+                msgInput.focus();
+                msgInput.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+              }}
+            }}, 100);
           }}
         }});
       }})();
