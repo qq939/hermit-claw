@@ -535,6 +535,116 @@ const env = {
 
 ---
 
+## 3. Claude Ask Server 服务
+
+每个 claude agent 卡片都要有一个初始的 server.js 服务，端口 8082，路径 `/ask/claude`，GET 访问，参数 `q="你要问的问题"`。支持 base64 编码，返回纯文本。底层依赖就是 `run_claude.js`。
+
+### 3.1 server.js 实现
+
+```javascript
+const http = require('http');
+const { spawn } = require('child_process');
+
+const PORT = 8082;
+const WORKSPACE_DIR = '/home/agent/.claude/workspace/project';
+
+const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    
+    if (req.method === 'GET' && url.pathname === '/ask/claude') {
+        const q = url.searchParams.get('q');
+        
+        if (!q) {
+            res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Missing q parameter');
+            return;
+        }
+        
+        let question;
+        try {
+            question = Buffer.from(q, 'base64').toString('utf8');
+        } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Invalid base64 encoding');
+            return;
+        }
+        
+        const systemPrompt = 'You are a helpful assistant. Answer the question concisely. Do not use markdown or formatting.';
+        const fullMessage = `${systemPrompt}\n\n${question}`;
+        const msgB64 = Buffer.from(fullMessage).toString('base64');
+        
+        const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '-p', '/dev/stdin'], {
+            cwd: WORKSPACE_DIR,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: true,
+            env: { ...process.env, ANTHROPIC_DISABLE_PREFLIGHT: '1' }
+        });
+        
+        let stdout = '';
+        let stderr = '';
+        
+        child.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+        
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+        
+        child.on('close', (code) => {
+            if (code === 0) {
+                res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end(stdout.trim());
+            } else {
+                res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end(stderr || `Exit code: ${code}`);
+            }
+        });
+        
+        child.on('error', (err) => {
+            res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end(`Spawn error: ${err.message}`);
+        });
+        
+        child.stdin.write(msgB64);
+        child.stdin.end();
+        
+    } else if (req.method === 'GET' && url.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('OK');
+    } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+    }
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Claude Ask Server running on port ${PORT}`);
+});
+```
+
+### 3.2 使用方式
+
+```
+GET /ask/claude?q=<base64编码的问题>
+```
+
+示例：
+```bash
+# 原始问题
+curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己' | base64)"
+
+# 解码后实际发送的消息
+你好，请介绍一下自己
+```
+
+### 3.3 响应格式
+
+- 成功：纯文本响应（200）
+- 失败：错误信息（500）
+
+---
+
 ## 4. Docker Agent 镜像配置
 
 所有 docker agent 镜像中已包含 Supabase agent skills 安装：
