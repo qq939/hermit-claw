@@ -1186,8 +1186,8 @@ def create_app(docker_client=None):
       button:hover {{ background: rgba(255,255,255,0.12); }}
       .grid {{
         margin-top: 16px;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+        display: flex;
+        flex-direction: column;
         gap: 14px;
       }}
       .card {{
@@ -1196,6 +1196,13 @@ def create_app(docker_client=None):
         overflow: hidden;
         background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
         box-shadow: var(--shadow);
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }}
+      .card:focus-within,
+      .card.tab-selected {{
+        border-color: #3AE374;
+        box-shadow: 0 0 0 2px rgba(58, 227, 116, 0.3), var(--shadow);
+        outline: none;
       }}
       .card.collapsed .card-body {{ display: none; }}
       .collapse-btn {{ background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px; }}
@@ -1354,6 +1361,7 @@ def create_app(docker_client=None):
         const div = document.createElement("div");
         div.className = "card collapsed";
         div.dataset.name = item.container_name;
+        div.setAttribute("tabindex", "-1");
         const stCls = item.status === "running" ? "status-running" : "status-other";
         const managed = !!item.managed;
         const sshPort = item.ssh_port;
@@ -1648,6 +1656,29 @@ def create_app(docker_client=None):
         await loadTypes();
         await refreshCards();
         setInterval(refreshCards, {poll_ms});
+        
+        let tabIndex = 0;
+        document.addEventListener('keydown', (e) => {{
+          if (e.key === 'Tab') {{
+            e.preventDefault();
+            const cardEls = Array.from(document.querySelectorAll('.card[data-name]'));
+            if (!cardEls.length) return;
+            
+            cardEls.forEach(c => c.classList.remove('tab-selected'));
+            tabIndex = (tabIndex + 1) % cardEls.length;
+            const selected = cardEls[tabIndex];
+            selected.classList.add('tab-selected');
+            
+            if (selected.classList.contains('collapsed')) {{
+              selected.classList.remove('collapsed');
+              const btn = selected.querySelector('.collapse-btn');
+              if (btn) btn.textContent = '▼';
+            }}
+            
+            const msgInput = selected.querySelector('.msg-input');
+            if (msgInput) setTimeout(() => msgInput.focus(), 50);
+          }}
+        }});
       }})();
     </script>
   </body>
