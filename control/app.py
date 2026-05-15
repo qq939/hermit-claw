@@ -1681,7 +1681,7 @@ def create_app(docker_client=None):
             if (btn) btn.textContent = '▼';
             
             setTimeout(() => {{
-              const msgInput = selected.querySelector('.msg-input');
+              const msgInput = selected.querySelector('.cmd-input');
               if (msgInput) {{
                 msgInput.focus();
                 msgInput.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
