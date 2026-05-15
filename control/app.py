@@ -1443,7 +1443,7 @@ def create_app(docker_client=None):
           }}
         }};
         div.querySelector('button[data-action="refresh"]').onclick = async () => {{
-          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=${{tail}}`, {{ cache: "no-store" }});
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=200`, {{ cache: "no-store" }});
           const d = await r.json();
           logBox.textContent = d.logs || d.error || "";
         }};
