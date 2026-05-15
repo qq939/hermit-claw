@@ -162,16 +162,16 @@ def create_app(docker_client=None):
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             print(f"[scp] waiting for SSH on {container_name}...", flush=True, file=sys.stderr)
-            for attempt in range(1, 11):
+            for attempt in range(1, 16):
                 try:
-                    ssh.connect(hostname=container_name, port=22, username="agent", password="agent", timeout=10, allow_agent=False, look_for_keys=False)
+                    ssh.connect(hostname=container_name, port=22, username="agent", password="agent", timeout=15, allow_agent=False, look_for_keys=False)
                     break
                 except (socket.timeout, paramiko.ssh_exception.SSHException, OSError) as e:
-                    print(f"[scp] attempt {attempt}/10 failed: {e}", flush=True, file=sys.stderr)
-                    if attempt == 10:
+                    print(f"[scp] attempt {attempt}/15 failed: {e}", flush=True, file=sys.stderr)
+                    if attempt == 15:
                         raise
                     import time
-                    time.sleep(2)
+                    time.sleep(3)
             sftp = ssh.open_sftp()
             for fname in files:
                 src = os.path.join(rules_dir, fname)
