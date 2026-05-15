@@ -12,15 +12,12 @@ RUN for i in 1 2 3 4 5; do \
 
 RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
-COPY agents/claude/run_claude.js /home/agent/.claude/run_claude.js
-
 RUN useradd -m -s /bin/bash -u 501 -g 20 agent \
     && echo "agent:agent" | chpasswd \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 0440 /etc/sudoers.d/agent \
     && mkdir -p /home/agent/.claude/workspace/project/logs \
     && printf '{"hasCompletedOnboarding":true,"hasTrustDialogAccepted":true,"hasCompletedProjectOnboarding":true}' > /home/agent/.claude.json \
-    && chmod +x /home/agent/.claude/run_claude.js \
     && printf '#!/bin/bash\ncd /home/agent/.claude/workspace/project\nif [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi\n' > /home/agent/.claude/workspace/project/start.sh \
     && chmod +x /home/agent/.claude/workspace/project/start.sh \
     && ssh-keygen -A \

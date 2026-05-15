@@ -29,8 +29,6 @@ RUN bash -c ' \
     done \
 '
 
-COPY agents/ollama/run_claude.js /home/agent/.claude/run_claude.js
-
 RUN bash -c ' \
     useradd -m -s /bin/bash -u 501 -g 20 agent; \
     echo "agent:agent" | chpasswd; \
@@ -38,7 +36,6 @@ RUN bash -c ' \
     chmod 0440 /etc/sudoers.d/agent; \
     mkdir -p /home/agent/.claude/workspace/project/logs; \
     printf "%s" "\"{\"hasCompletedOnboarding\":true,\"hasTrustDialogAccepted\":true,\"hasCompletedProjectOnboarding\":true}\"" > /home/agent/.claude.json; \
-    chmod +x /home/agent/.claude/run_claude.js; \
     printf "%s\n" "#!/bin/bash" "cd /home/agent/.claude/workspace/project" "if [ -f user_start.sh ] && [ -s user_start.sh ]; then chmod +x user_start.sh; ./user_start.sh; fi" > /home/agent/.claude/workspace/project/start.sh; \
     chmod +x /home/agent/.claude/workspace/project/start.sh; \
     ssh-keygen -A; \

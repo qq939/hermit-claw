@@ -179,6 +179,8 @@ def create_app(docker_client=None):
                 sftp.put(src, dst)
                 print(f"[scp] copied {fname} -> {project_path}/", flush=True, file=sys.stderr)
             sftp.close()
+            stdin, stdout, stderr = ssh.exec_command(f"chmod -R +x {project_path} 2>/dev/null || true")
+            print(f"[scp] chmod -R +x {project_path}", flush=True, file=sys.stderr)
             ssh.close()
             print(f"[scp] done, {len(files)} files copied", flush=True, file=sys.stderr)
         except Exception as e:
@@ -368,7 +370,7 @@ def create_app(docker_client=None):
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
+                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
             else:
                 default_msg = INITIAL_MESSAGE.format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
@@ -903,7 +905,7 @@ def create_app(docker_client=None):
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/run_claude.js >> '{log_path}' 2>&1"
+                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
             else:
                 default_msg = INITIAL_MESSAGE.format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
