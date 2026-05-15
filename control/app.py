@@ -1446,6 +1446,7 @@ def create_app(docker_client=None):
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=200`, {{ cache: "no-store" }});
           const d = await r.json();
           logBox.textContent = d.logs || d.error || "";
+          logBox.scrollTop = logBox.scrollHeight;
         }};
         div.querySelector('button[data-action="download"]').onclick = () => {{
           window.open(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs/download?tail=500`, "_blank");
