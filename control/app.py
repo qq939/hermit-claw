@@ -484,46 +484,81 @@ def create_app(docker_client=None):
         return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
     def fork_agent(container_name):
-        import shutil
+        import shutil, traceback
+        debug_log = "/logs/hermit/debug.log"
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"\n=== FORK START: {container_name} ===\n")
+        
         container = docker_client_or_default().containers.get(container_name)
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type") or ""
+        
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"agent_type: {agent_type}\n")
+        
         if agent_type not in AGENT_SPECS:
-            raise ValueError("Unsupported agent type")
+            raise ValueError(f"Unsupported agent type: {agent_type}")
 
         new_host_port = find_next_port()
-        base_name = derive_agent_basename(container.name)
+        base_name = derive_agent_basename(container_name)
         new_container_name = f"{new_host_port}-{base_name}"
 
-        host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
-        host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
-        src_workspace = os.path.join(host_workspaces_root, container.name)
-        dst_workspace = os.path.join(host_workspaces_root, new_container_name)
-        dst_logs = os.path.join(host_logs_root, new_container_name)
+        src_workspace = f"/workspaces/{container_name}"
+        dst_workspace = f"/workspaces/{new_container_name}"
+        dst_logs = f"/logs/{new_container_name}"
+
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"src_workspace: {src_workspace}\n")
+            f.write(f"dst_workspace: {dst_workspace}\n")
 
         try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 1: _copy_workspace_tree\n")
             _copy_workspace_tree(src_workspace, dst_workspace)
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 2: makedirs dst_logs\n")
             os.makedirs(dst_logs, exist_ok=True)
             try:
                 os.chown(dst_logs, 501, 20)
             except Exception:
                 pass
 
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 3: create_agent\n")
             body = {"message": "", "skip_initial_message": True}
             payload = create_agent(agent_type, base_name, body=body)
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"created payload: {payload}\n")
+            
             created_name = payload["container_name"]
             if created_name != new_container_name:
                 created_container = docker_client_or_default().containers.get(created_name)
                 created_container.remove(force=True)
                 raise RuntimeError(f"Fork expected {new_container_name}, got {created_name}")
 
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 4: add_frpc_rule\n")
             add_frpc_rule(payload["host_port"])
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 5: sleep 5\n")
             project_path = project_path_for_agent_type(agent_type)
             import time
             time.sleep(5)
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 6: scp_rules_to_container\n")
             scp_rules_to_container(payload["container_name"], project_path)
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK SUCCESS: {payload}\n")
             return payload
-        except Exception:
+        except Exception as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK ERROR: {str(e)}\n")
+                f.write(traceback.format_exc())
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
             raise
