@@ -562,10 +562,14 @@ const server = http.createServer((req, res) => {
         
         let question;
         try {
-            question = Buffer.from(q, 'base64').toString('utf8');
+            if (q.includes(' ') || q.length < 50) {
+                question = decodeURIComponent(q);
+            } else {
+                question = Buffer.from(q, 'base64').toString('utf8');
+            }
         } catch (e) {
             res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('Invalid base64 encoding');
+            res.end('Invalid encoding');
             return;
         }
         
@@ -626,17 +630,21 @@ server.listen(PORT, '0.0.0.0', () => {
 ### 3.2 使用方式
 
 ```
-GET /ask/claude?q=<base64编码的问题>
+GET /ask/claude?q=<普通字符串或base64编码>
 ```
 
 示例：
 ```bash
-# 原始问题
-curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己' | base64)"
+# 普通字符串（自动识别）
+curl "http://localhost:8082/ask/claude?q=你好，请介绍一下自己"
 
-# 解码后实际发送的消息
-你好，请介绍一下自己
+# base64 编码（用于复杂内容）
+curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己' | base64)"
 ```
+
+智能识别规则：
+- 参数包含空格或长度 < 50：当作普通字符串，`decodeURIComponent(q)`
+- 其他情况：当作 base64 编码
 
 ### 3.3 响应格式
 
