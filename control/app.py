@@ -1415,6 +1415,19 @@ def create_app(docker_client=None):
         const sshBtn = div.querySelector('button[data-action="ssh"]');
         const cmdInput = div.querySelector('[data-role="cmd-input"]');
         let sshActive = false;
+        let lastEnterTime = 0;
+        cmdInput.addEventListener('keydown', (e) => {{
+          if (e.key === 'Enter') {{
+            const now = Date.now();
+            if (now - lastEnterTime < 600) {{
+              e.preventDefault();
+              sendMessage();
+              lastEnterTime = 0;
+            }} else {{
+              lastEnterTime = now;
+            }}
+          }}
+        }});
         sshBtn.onclick = () => {{
           sshActive = !sshActive;
           sshBtn.style.fontWeight = sshActive ? "bold" : "";
@@ -1664,8 +1677,10 @@ def create_app(docker_client=None):
             const cardEls = Array.from(document.querySelectorAll('.card[data-name]'));
             if (!cardEls.length) return;
             
-            cardEls.forEach(card => {{
-              if (card !== cardEls[tabIndex]) {{
+            const nextIndex = (tabIndex + 1) % cardEls.length;
+            
+            cardEls.forEach((card, i) => {{
+              if (i !== nextIndex) {{
                 card.classList.add('collapsed');
                 card.classList.remove('tab-selected');
                 const btn = card.querySelector('.collapse-btn');
@@ -1673,7 +1688,7 @@ def create_app(docker_client=None):
               }}
             }});
             
-            tabIndex = (tabIndex + 1) % cardEls.length;
+            tabIndex = nextIndex;
             const selected = cardEls[tabIndex];
             selected.classList.remove('collapsed');
             selected.classList.add('tab-selected');
