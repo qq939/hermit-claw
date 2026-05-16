@@ -247,33 +247,25 @@ def create_app(docker_client=None):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"Target workspace already exists: {dst_dir}")
-        
-        def _copy_with_symlinks(src, dst):
-            for item in os.scandir(src):
-                src_path = item.path
-                dst_path = os.path.join(dst, item.name)
-                
-                if item.name == '.git' or item.name.startswith('.'):
-                    continue
-                
-                if item.is_symlink():
-                    try:
-                        target = os.readlink(src_path)
-                        if os.path.isdir(target):
-                            shutil.copytree(target, dst_path, dirs_exist_ok=True, copy_function=shutil.copy2)
-                        else:
-                            shutil.copy2(src_path, dst_path)
-                    except Exception:
-                        pass
-                elif item.is_dir():
-                    os.makedirs(dst_path, exist_ok=True)
-                    _copy_with_symlinks(src_path, dst_path)
-                else:
-                    shutil.copy2(src_path, dst_path)
-        
         os.makedirs(dst_dir, exist_ok=True)
-        _copy_with_symlinks(src_dir, dst_dir)
-        
+        for root, dirs, files in os.walk(src_dir):
+            rel_root = os.path.relpath(root, src_dir)
+            dst_root = os.path.join(dst_dir, rel_root) if rel_root != '.' else dst_dir
+            for name in files:
+                try:
+                    src_file = os.path.join(root, name)
+                    dst_file = os.path.join(dst_root, name)
+                    shutil.copy2(src_file, dst_file)
+                except Exception:
+                    pass
+            for name in dirs:
+                try:
+                    src_subdir = os.path.join(root, name)
+                    dst_subdir = os.path.join(dst_root, name)
+                    os.makedirs(dst_subdir, exist_ok=True)
+                    os.chown(dst_subdir, 501, 20)
+                except Exception:
+                    pass
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
@@ -556,7 +548,7 @@ def create_app(docker_client=None):
 
             with open(debug_log, "a", encoding="utf-8") as f:
                 f.write("Step 3: create_agent\n")
-            body = {"message": "", "skip_initial_message": True}
+            body = {"message": ""}  # 不跳过初始消息
             payload = create_agent(agent_type, base_name, body=body)
             
             with open(debug_log, "a", encoding="utf-8") as f:
@@ -1103,10 +1095,27 @@ def create_app(docker_client=None):
             agent_type = labels.get("hermit.agent_type", "")
             payload = recreate_agent(name)
             add_frpc_rule(payload["host_port"])
+            import time
+            time.sleep(8)
             if agent_type in ("claude", "ollama"):
                 scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
+                project_path = "/home/agent/.claude/workspace/project"
             else:
                 scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
+                project_path = "/home/agent/.openclaw/workspace/project"
+            default_msg = INITIAL_MESSAGE.format(agent="claude" if agent_type in ("claude", "ollama") else "openclaw")
+            msg_b64 = __import__('base64').b64encode(default_msg.encode('utf-8')).decode('ascii')
+            msg_file = "/tmp/send_msg.sh"
+            if agent_type in ("claude", "ollama"):
+                script = f"CLAUDE_MSG='{msg_b64}' node {project_path}/run_claude.js >> '{project_path}/logs/agent_tui.log' 2>&1"
+            else:
+                script = f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{project_path}/logs/agent_tui.log' 2>&1"
+            try:
+                container_new = docker_client_or_default().containers.get(payload["container_name"])
+                container_new.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
+                container_new.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{project_path}/logs/agent_tui.log' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+            except Exception as e:
+                print(f"[recreate] send initial message failed: {e}", flush=True, file=sys.stderr)
             return jsonify(payload)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
