@@ -617,39 +617,58 @@ def create_app(docker_client=None):
   <style>
     body {{ margin: 0; padding: 4px; background: #1e1e1e; overflow: hidden; }}
     #terminal {{ width: 100%; height: 100vh; }}
+    #debug {{ position: fixed; top: 0; left: 0; right: 0; background: #333; color: #0f0; font-family: monospace; font-size: 11px; padding: 4px; max-height: 120px; overflow-y: auto; z-index: 9999; white-space: pre-wrap; }}
+    #err {{ color: #f66; }}
   </style>
 </head>
 <body>
+  <div id="debug"></div>
   <div id="terminal"></div>
   <script>
+    const dbg = document.getElementById('debug');
+    function log(msg) {{ dbg.textContent += msg + '\\n'; dbg.scrollTop = dbg.scrollHeight; console.log(msg); }}
+    function err(msg) {{ dbg.innerHTML += '<span id="err">' + msg + '</span>\\n'; dbg.scrollTop = dbg.scrollHeight; console.error(msg); }}
+    
+    log('=== SSH Terminal DEBUG ===');
+    log('Container: {container_name}');
+    log('Location: ' + location.href);
+    
     const term = new Terminal({{ cursorBlink: true, fontSize: 14, fontFamily: 'Menlo, Monaco, "Courier New", monospace' }});
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById('terminal'));
     fitAddon.fit();
+    log('Terminal initialized');
 
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = wsProtocol + '//' + location.host + '/ws/ssh?container={container_name}';
+    log('WebSocket URL: ' + wsUrl);
+    
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {{
+      log('[WS] Connected');
       term.write('\\x1b[32mConnected to {container_name} via SSH\\x1b[0m\\r\\n');
       term.onData(data => ws.send(data));
     }};
 
     ws.onmessage = (event) => {{
+      log('[WS] Received ' + event.data.length + ' bytes');
       term.write(event.data);
     }};
 
-    ws.onclose = () => {{
+    ws.onclose = (e) => {{
+      log('[WS] Closed, code=' + e.code + ', reason=' + e.reason);
       term.write('\\r\\n\\x1b[31m[Connection Closed]\\x1b[0m\\r\\n');
     }};
 
-    ws.onerror = (err) => {{
+    ws.onerror = (e) => {{
+      err('[WS] Error: ' + JSON.stringify(e));
       term.write('\\r\\n\\x1b[31m[WebSocket Error]\\x1b[0m\\r\\n');
     }};
 
     window.addEventListener('resize', () => fitAddon.fit());
+    log('Waiting for connection...');
   </script>
 </body>
 </html>"""
@@ -661,7 +680,9 @@ def create_app(docker_client=None):
     def ws_ssh(ws):
         import threading
         container_name = request.args.get("container")
+        print(f"[ws-ssh] New connection request, container={container_name}", flush=True, file=sys.stderr)
         if not container_name:
+            print("[ws-ssh] No container name, closing", flush=True, file=sys.stderr)
             ws.close()
             return
 
@@ -669,7 +690,9 @@ def create_app(docker_client=None):
             client = docker_client_or_default()
             try:
                 container = client.containers.get(container_name)
-            except Exception:
+                print(f"[ws-ssh] Container found: {container_name}", flush=True, file=sys.stderr)
+            except Exception as e:
+                print(f"[ws-ssh] Container not found: {e}", flush=True, file=sys.stderr)
                 ws.close()
                 return
             labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
@@ -678,9 +701,11 @@ def create_app(docker_client=None):
                 project_path = "/home/agent/.claude/workspace/project"
             else:
                 project_path = "/home/agent/.openclaw/workspace/project"
+            print(f"[ws-ssh] Agent type: {agent_type}, project path: {project_path}", flush=True, file=sys.stderr)
 
             import paramiko
         except ImportError:
+            print("[ws-ssh] paramiko not installed", flush=True, file=sys.stderr)
             ws.send("paramiko not installed\r\n")
             ws.close()
             return
@@ -689,6 +714,7 @@ def create_app(docker_client=None):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         try:
+            print(f"[ws-ssh] Connecting SSH to {container_name}:22", flush=True, file=sys.stderr)
             ssh.connect(
                 hostname=container_name,
                 port=22,
@@ -698,8 +724,10 @@ def create_app(docker_client=None):
                 allow_agent=False,
                 look_for_keys=False,
             )
+            print("[ws-ssh] SSH connected", flush=True, file=sys.stderr)
             transport = ssh.get_transport()
             if not transport:
+                print("[ws-ssh] No transport", flush=True, file=sys.stderr)
                 ws.close()
                 return
             transport.set_keepalive(10)
@@ -714,6 +742,7 @@ def create_app(docker_client=None):
                 try:
                     while True:
                         if chan.exit_status_ready():
+                            print("[ws-ssh] Shell exited", flush=True, file=sys.stderr)
                             break
                         try:
                             data = chan.recv(65536)
