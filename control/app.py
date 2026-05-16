@@ -246,7 +246,7 @@ def create_app(docker_client=None):
         if not os.path.isdir(src_dir):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
-            shutil.rmtree(dst_dir)
+            raise FileExistsError(f"目标工作空间已存在: {dst_dir}，请先删除再试")
         result = subprocess.run(["cp", "-a", src_dir, dst_dir], capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"copy failed: {result.stderr}")
@@ -561,6 +561,10 @@ def create_app(docker_client=None):
             with open(debug_log, "a", encoding="utf-8") as f:
                 f.write(f"FORK SUCCESS: {payload}\n")
             return payload
+        except FileExistsError as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK ERROR: {str(e)}\n")
+            raise ValueError(str(e))
         except Exception as e:
             with open(debug_log, "a", encoding="utf-8") as f:
                 f.write(f"FORK ERROR: {str(e)}\n")
@@ -1031,7 +1035,10 @@ def create_app(docker_client=None):
             project_path = project_path_for_agent_type(agent_type)
 
             if commit_hash == "__FORK__":
-                payload = fork_agent(name)
+                try:
+                    payload = fork_agent(name)
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
                 return jsonify({
                     "ok": True,
                     "mode": "fork",
