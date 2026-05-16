@@ -247,7 +247,33 @@ def create_app(docker_client=None):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"Target workspace already exists: {dst_dir}")
-        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=False)
+        
+        def _copy_with_symlinks(src, dst):
+            for item in os.scandir(src):
+                src_path = item.path
+                dst_path = os.path.join(dst, item.name)
+                
+                if item.name == '.git' or item.name.startswith('.'):
+                    continue
+                
+                if item.is_symlink():
+                    try:
+                        target = os.readlink(src_path)
+                        if os.path.isdir(target):
+                            shutil.copytree(target, dst_path, dirs_exist_ok=True, copy_function=shutil.copy2)
+                        else:
+                            shutil.copy2(src_path, dst_path)
+                    except Exception:
+                        pass
+                elif item.is_dir():
+                    os.makedirs(dst_path, exist_ok=True)
+                    _copy_with_symlinks(src_path, dst_path)
+                else:
+                    shutil.copy2(src_path, dst_path)
+        
+        os.makedirs(dst_dir, exist_ok=True)
+        _copy_with_symlinks(src_dir, dst_dir)
+        
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
