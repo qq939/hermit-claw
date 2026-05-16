@@ -1457,14 +1457,22 @@ def create_app(docker_client=None):
           if (sshActive) {{
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/ssh-terminal`;
             console.log('Setting iframe src to:', url);
+            logBox.style.display = "none";
             sshIframe.style.display = "block";
             sshIframe.style.visibility = "visible";
+            sshIframe.style.position = "fixed";
+            sshIframe.style.top = "60px";
+            sshIframe.style.left = "10px";
+            sshIframe.style.width = "calc(100% - 20px)";
+            sshIframe.style.height = "calc(100vh - 80px)";
+            sshIframe.style.zIndex = "9999";
             sshIframe.src = url;
-            logBox.style.display = "none";
           }} else {{
             sshIframe.src = "";
             sshIframe.style.display = "none";
             sshIframe.style.visibility = "hidden";
+            sshIframe.style.position = "";
+            sshIframe.style.zIndex = "";
             logBox.style.display = "block";
           }}
         }};
