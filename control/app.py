@@ -242,30 +242,14 @@ def create_app(docker_client=None):
             return ""
 
     def _copy_workspace_tree(src_dir, dst_dir):
-        import shutil
+        import subprocess
         if not os.path.isdir(src_dir):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"Target workspace already exists: {dst_dir}")
-        os.makedirs(dst_dir, exist_ok=True)
-        for root, dirs, files in os.walk(src_dir):
-            rel_root = os.path.relpath(root, src_dir)
-            dst_root = os.path.join(dst_dir, rel_root) if rel_root != '.' else dst_dir
-            for name in files:
-                try:
-                    src_file = os.path.join(root, name)
-                    dst_file = os.path.join(dst_root, name)
-                    shutil.copy2(src_file, dst_file)
-                except Exception:
-                    pass
-            for name in dirs:
-                try:
-                    src_subdir = os.path.join(root, name)
-                    dst_subdir = os.path.join(dst_root, name)
-                    os.makedirs(dst_subdir, exist_ok=True)
-                    os.chown(dst_subdir, 501, 20)
-                except Exception:
-                    pass
+        result = subprocess.run(["cp", "-a", src_dir, dst_dir], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"copy failed: {result.stderr}")
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
