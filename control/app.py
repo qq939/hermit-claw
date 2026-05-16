@@ -1369,7 +1369,6 @@ def create_app(docker_client=None):
           <div class="card-head">
             <div style="display:flex;align-items:center;gap:8px;">
               <button class="collapse-btn" data-action="collapse">▶</button>
-              <button data-action="ssh" style="font-size:11px;padding:2px 8px;background:rgba(255,255,255,0.1);border:none;color:#888;cursor:pointer;border-radius:4px;">SSH</button>
               <div style="display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="card-title" data-action="git-dropdown" style="cursor:pointer;color:#2196F3;font-weight:500;">${{item.container_name}}</span>
@@ -1390,6 +1389,7 @@ def create_app(docker_client=None):
           </div>
           <div class="card-body">
           <div class="actions">
+            <button data-action="ssh">SSH终端</button>
             <button data-action="refresh">刷新日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
@@ -1401,7 +1401,7 @@ def create_app(docker_client=None):
             <button data-action="send">发送</button>
           </div>
           <pre id="log-${{item.container_name}}" class="log-view">${{item.logs || ""}}</pre>
-          <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:400px; border:1px solid #ccc;" src=""></iframe>
+          <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:500px; border:1px solid #ccc;" src=""></iframe>
           </div>
         `;
         const collapseBtn = div.querySelector('.collapse-btn');
