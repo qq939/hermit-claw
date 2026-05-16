@@ -1738,6 +1738,26 @@ def create_app(docker_client=None):
             }}, 100);
           }}
         }});
+        document.addEventListener('click', (e) => {{
+          const card = e.target.closest('.card[data-name]');
+          if (!card) return;
+          const cardEls = Array.from(document.querySelectorAll('.card[data-name]'));
+          const clickedIndex = cardEls.indexOf(card);
+          if (clickedIndex < 0) return;
+          tabIndex = clickedIndex;
+          cardEls.forEach((c, i) => {{
+            if (i !== clickedIndex) {{
+              c.classList.add('collapsed');
+              c.classList.remove('tab-selected');
+              const btn = c.querySelector('.collapse-btn');
+              if (btn) btn.textContent = '▶';
+            }}
+          }});
+          card.classList.remove('collapsed');
+          card.classList.add('tab-selected');
+          const btn = card.querySelector('.collapse-btn');
+          if (btn) btn.textContent = '▼';
+        }});
       }})();
     </script>
   </body>
