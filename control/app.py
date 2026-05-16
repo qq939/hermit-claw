@@ -1403,7 +1403,7 @@ def create_app(docker_client=None):
             <button data-action="send">发送</button>
           </div>
           <pre id="log-${{item.container_name}}" class="log-view">${{item.logs || ""}}</pre>
-          <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; min-height:400px; border:1px solid #3AE374; background:#1e1e1e;" src="" allow="fullscreen"></iframe>
+          <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:400px; border:1px solid #ccc;" src="" allow="fullscreen"></iframe>
           </div>
         `;
         const collapseBtn = div.querySelector('.collapse-btn');
@@ -1438,12 +1438,14 @@ def create_app(docker_client=None):
           if (sshActive) {{
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/ssh-terminal`;
             console.log('Setting iframe src to:', url);
+            sshIframe.style.display = "block";
+            sshIframe.style.visibility = "visible";
             sshIframe.src = url;
             logBox.style.display = "none";
-            sshIframe.style.display = "block";
           }} else {{
             sshIframe.src = "";
             sshIframe.style.display = "none";
+            sshIframe.style.visibility = "hidden";
             logBox.style.display = "block";
           }}
         }};
