@@ -242,11 +242,11 @@ def create_app(docker_client=None):
             return ""
 
     def _copy_workspace_tree(src_dir, dst_dir):
-        import subprocess
+        import subprocess, shutil
         if not os.path.isdir(src_dir):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
-            raise FileExistsError(f"Target workspace already exists: {dst_dir}")
+            shutil.rmtree(dst_dir)
         result = subprocess.run(["cp", "-a", src_dir, dst_dir], capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"copy failed: {result.stderr}")
@@ -1457,22 +1457,14 @@ def create_app(docker_client=None):
           if (sshActive) {{
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/ssh-terminal`;
             console.log('Setting iframe src to:', url);
-            logBox.style.display = "none";
             sshIframe.style.display = "block";
             sshIframe.style.visibility = "visible";
-            sshIframe.style.position = "fixed";
-            sshIframe.style.top = "60px";
-            sshIframe.style.left = "10px";
-            sshIframe.style.width = "calc(100% - 20px)";
-            sshIframe.style.height = "calc(100vh - 80px)";
-            sshIframe.style.zIndex = "9999";
             sshIframe.src = url;
+            logBox.style.display = "none";
           }} else {{
             sshIframe.src = "";
             sshIframe.style.display = "none";
             sshIframe.style.visibility = "hidden";
-            sshIframe.style.position = "";
-            sshIframe.style.zIndex = "";
             logBox.style.display = "block";
           }}
         }};
