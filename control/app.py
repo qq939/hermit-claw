@@ -813,7 +813,7 @@ def create_app(docker_client=None):
             # 增加 --add-dir /config 以允许访问配置目录
             result = subprocess.run(
                 ["claude", "--continue", "-p", tmp_file, "--add-dir", "/config"],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=3600,
                 env=env
             )
             os.unlink(tmp_file)
