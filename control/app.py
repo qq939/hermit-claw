@@ -906,29 +906,41 @@ def create_app(docker_client=None):
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
-            msg_file = "/tmp/send_msg.sh"
+            
             if agent_type in ("claude", "ollama"):
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
-                log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg
-                escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
+                agent_ip = list(container.attrs.get("NetworkSettings", {}).get("Networks", {}).values())[0].get("IPAddress", "localhost")
+                try:
+                    resp = __import__('requests').post(
+                        f"http://{agent_ip}:8082/ask/claude?q={msg_b64}",
+                        timeout=3600
+                    )
+                except __import__('requests').exceptions.Timeout:
+                    return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso(), "note": "request timeout (60min)"}), 200
+                except Exception as e:
+                    return jsonify({"error": f"Failed to call /ask/claude: {str(e)}"}), 500
+                if resp.status_code == 200:
+                    return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso(), "response": resp.text[:500]}), 200
+                else:
+                    return jsonify({"error": f"/ask/claude returned {resp.status_code}: {resp.text[:200]}", "container_name": name}), 500
             else:
+                msg_file = "/tmp/send_msg.sh"
                 default_msg = INITIAL_MESSAGE.format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = message or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
                 script = f"node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; const j=JSON.parse(fs.readFileSync(p,\"utf8\")); delete j.gateway.bind; delete j.gateway.mode; fs.writeFileSync(p,JSON.stringify(j));'; echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
-            try:
-                ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-                container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
-                container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
-                container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-            return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
+                try:
+                    ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+                    container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
+                    container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
+                    container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
+                return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
