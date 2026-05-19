@@ -37,17 +37,13 @@ const timeout = setTimeout(() => {
 
 if (child.stdout) {
     child.stdout.on('data', (data) => {
-        const output = data.toString();
-        try { fs.appendFileSync(LOG_FILE, output); } catch (e) {}
-        process.stdout.write(output);
+        try { fs.appendFileSync(LOG_FILE, data.toString()); } catch (e) {}
     });
 }
 
 if (child.stderr) {
     child.stderr.on('data', (data) => {
-        const output = data.toString();
-        try { fs.appendFileSync(LOG_FILE, output); } catch (e) {}
-        process.stderr.write(output);
+        try { fs.appendFileSync(LOG_FILE, data.toString()); } catch (e) {}
     });
 }
 
