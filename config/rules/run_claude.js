@@ -1,6 +1,27 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const TIMEOUT_MS = 3600 * 1000;
+const CLAUDE_MSG = process.env.CLAUDE_MSG;
+const LOG_FILE = path.join(process.env.HOME || '/home/agent', '.claude/workspace/project/logs/agent_tui.log');
+
+if (!CLAUDE_MSG) {
+    console.error('[ERROR] CLAUDE_MSG environment variable is required');
+    process.exit(1);
+}
+
+const message = Buffer.from(CLAUDE_MSG, 'base64').toString('utf8');
+const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+const logEntry = `\n[${timestamp}] $ ${message}\n`;
+
+try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    fs.appendFileSync(LOG_FILE, logEntry);
+} catch (e) {
+    console.error('[WARN] Failed to write to log file:', e.message);
+}
 
 const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '--print'], {
     stdio: ['pipe', 'inherit', 'inherit'],
@@ -14,7 +35,31 @@ const timeout = setTimeout(() => {
     setTimeout(() => child.kill('SIGKILL'), 5000);
 }, TIMEOUT_MS);
 
-child.on('close', () => clearTimeout(timeout));
-child.on('error', () => clearTimeout(timeout));
+child.stdout.on('data', (data) => {
+    const output = data.toString();
+    try {
+        fs.appendFileSync(LOG_FILE, output);
+    } catch (e) {}
+    process.stdout.write(output);
+});
 
-child.stdin.end(Buffer.from(process.env.CLAUDE_MSG, 'base64').toString('utf8'));
+child.stderr.on('data', (data) => {
+    const output = data.toString();
+    try {
+        fs.appendFileSync(LOG_FILE, output);
+    } catch (e) {}
+    process.stderr.write(output);
+});
+
+child.on('close', (code) => {
+    clearTimeout(timeout);
+    process.exit(code);
+});
+
+child.on('error', (err) => {
+    clearTimeout(timeout);
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+});
+
+child.stdin.end(message);
