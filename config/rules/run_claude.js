@@ -23,8 +23,8 @@ try {
     console.error('[WARN] Failed to write to log file:', e.message);
 }
 
-const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '--print'], {
-    stdio: ['pipe', 'inherit', 'inherit'],
+const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '--print', '-'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
     shell: true,
     env: { ...process.env, ANTHROPIC_DISABLE_PREFLIGHT: '1' }
 });
@@ -35,21 +35,21 @@ const timeout = setTimeout(() => {
     setTimeout(() => child.kill('SIGKILL'), 5000);
 }, TIMEOUT_MS);
 
-child.stdout.on('data', (data) => {
-    const output = data.toString();
-    try {
-        fs.appendFileSync(LOG_FILE, output);
-    } catch (e) {}
-    process.stdout.write(output);
-});
+if (child.stdout) {
+    child.stdout.on('data', (data) => {
+        const output = data.toString();
+        try { fs.appendFileSync(LOG_FILE, output); } catch (e) {}
+        process.stdout.write(output);
+    });
+}
 
-child.stderr.on('data', (data) => {
-    const output = data.toString();
-    try {
-        fs.appendFileSync(LOG_FILE, output);
-    } catch (e) {}
-    process.stderr.write(output);
-});
+if (child.stderr) {
+    child.stderr.on('data', (data) => {
+        const output = data.toString();
+        try { fs.appendFileSync(LOG_FILE, output); } catch (e) {}
+        process.stderr.write(output);
+    });
+}
 
 child.on('close', (code) => {
     clearTimeout(timeout);
@@ -62,4 +62,5 @@ child.on('error', (err) => {
     process.exit(1);
 });
 
-child.stdin.end(message);
+child.stdin.write(message);
+child.stdin.end();
