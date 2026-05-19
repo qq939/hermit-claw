@@ -911,20 +911,13 @@ def create_app(docker_client=None):
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
                 msg_to_send = message or default_msg
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                agent_ip = list(container.attrs.get("NetworkSettings", {}).get("Networks", {}).values())[0].get("IPAddress", "localhost")
+                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js"
                 try:
-                    resp = __import__('requests').post(
-                        f"http://{agent_ip}:8082/ask/claude?q={msg_b64}",
-                        timeout=3600
-                    )
-                except __import__('requests').exceptions.Timeout:
-                    return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso(), "note": "request timeout (60min)"}), 200
+                    container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
+                    container.exec_run(["/bin/sh", "-lc", f"nohup /tmp/send_msg.sh >> /home/agent/.claude/workspace/project/logs/agent_tui.log 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
                 except Exception as e:
-                    return jsonify({"error": f"Failed to call /ask/claude: {str(e)}"}), 500
-                if resp.status_code == 200:
-                    return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso(), "response": resp.text[:500]}), 200
-                else:
-                    return jsonify({"error": f"/ask/claude returned {resp.status_code}: {resp.text[:200]}", "container_name": name}), 500
+                    return jsonify({"error": str(e)}), 500
+                return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
             else:
                 msg_file = "/tmp/send_msg.sh"
                 default_msg = INITIAL_MESSAGE.format(agent="openclaw")
