@@ -5,6 +5,7 @@ const path = require('path');
 const TIMEOUT_MS = 3600 * 1000;
 const CLAUDE_MSG = process.env.CLAUDE_MSG;
 const LOG_FILE = path.join(process.env.HOME || '/home/agent', '.claude/workspace/project/logs/agent_tui.log');
+const CAPTURE_STDIO = process.env.CLAUDE_CAPTURE_STDIO === '1';
 
 if (!CLAUDE_MSG) {
     console.error('[ERROR] CLAUDE_MSG environment variable is required');
@@ -37,13 +38,17 @@ const timeout = setTimeout(() => {
 
 if (child.stdout) {
     child.stdout.on('data', (data) => {
-        try { fs.appendFileSync(LOG_FILE, data.toString()); } catch (e) {}
+        const text = data.toString();
+        try { fs.appendFileSync(LOG_FILE, text); } catch (e) {}
+        if (CAPTURE_STDIO) process.stdout.write(text);
     });
 }
 
 if (child.stderr) {
     child.stderr.on('data', (data) => {
-        try { fs.appendFileSync(LOG_FILE, data.toString()); } catch (e) {}
+        const text = data.toString();
+        try { fs.appendFileSync(LOG_FILE, text); } catch (e) {}
+        if (CAPTURE_STDIO) process.stderr.write(text);
     });
 }
 
