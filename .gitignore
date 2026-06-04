@@ -1,7 +1,6 @@
 .venv/
 venv/
 config/*
-!config/rules/
 config/rules/*
 !config/rules/systemreadme.md
 !config/rules/run_claude.js
