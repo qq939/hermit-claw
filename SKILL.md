@@ -70,7 +70,7 @@ curl -sS -X POST "http://localhost:18080/api/agents/18081-writer/command" \
 
 ## 6) 其他
 
-Hermit 平台这两个 API 的理解和实际用法：
+Hermit 平台这两个 API 的理解和实际用法，ssh是兜底用法，实际部署任务都可以通过send-message让claude帮你部署
 
 ---
 
