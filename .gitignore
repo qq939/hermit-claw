@@ -15,6 +15,10 @@ build/
 logs/
 workspaces/
 config/
+openai.env
+.env
+.env.*
+!.env.example
 .DS_Store
 *.swp
 *.swo
