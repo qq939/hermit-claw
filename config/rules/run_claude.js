@@ -38,8 +38,8 @@ if (CLAUDE_IMG) {
         const buffer = Buffer.from(imgData, 'base64');
         fs.writeFileSync(imgPath, buffer);
         console.error(`[IMG] Image saved to: ${imgPath}`);
-        // 在消息末尾添加图片引用
-        message += `\n\n[图片参考: tmp.png]`;
+        // 使用 Claude Code 能识别的图片引用格式
+        message += `\n\n![image](file://${imgPath})`;
     } catch (e) {
         console.error('[WARN] Failed to save image:', e.message);
     }
