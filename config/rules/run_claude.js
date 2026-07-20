@@ -4,15 +4,17 @@ const path = require('path');
 
 const TIMEOUT_MS = 3600 * 1000;
 const CLAUDE_MSG = process.env.CLAUDE_MSG;
+const CLAUDE_IMG = process.env.CLAUDE_IMG;  // 可选，图片base64编码
 const LOG_FILE = path.join(process.env.HOME || '/home/agent', '.claude/workspace/project/logs/agent_tui.log');
 const CAPTURE_STDIO = process.env.CLAUDE_CAPTURE_STDIO === '1';
+const WORKSPACE_DIR = path.join(process.env.HOME || '/home/agent', '.claude/workspace/project');
 
 if (!CLAUDE_MSG) {
     console.error('[ERROR] CLAUDE_MSG environment variable is required');
     process.exit(1);
 }
 
-const message = Buffer.from(CLAUDE_MSG, 'base64').toString('utf8');
+let message = Buffer.from(CLAUDE_MSG, 'base64').toString('utf8');
 const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
 const logEntry = `\n[${timestamp}] $ ${message}\n`;
@@ -22,6 +24,25 @@ try {
     fs.appendFileSync(LOG_FILE, logEntry);
 } catch (e) {
     console.error('[WARN] Failed to write to log file:', e.message);
+}
+
+// 处理图片（可选）
+if (CLAUDE_IMG) {
+    const imgPath = path.join(WORKSPACE_DIR, 'tmp.png');
+    try {
+        // 确保是有效的 base64 数据
+        let imgData = CLAUDE_IMG;
+        if (imgData.includes(',')) {
+            imgData = imgData.split(',')[1];
+        }
+        const buffer = Buffer.from(imgData, 'base64');
+        fs.writeFileSync(imgPath, buffer);
+        console.error(`[IMG] Image saved to: ${imgPath}`);
+        // 在消息末尾添加图片引用
+        message += `\n\n[图片参考: tmp.png]`;
+    } catch (e) {
+        console.error('[WARN] Failed to save image:', e.message);
+    }
 }
 
 const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '--print', '-'], {

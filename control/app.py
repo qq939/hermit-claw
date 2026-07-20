@@ -773,9 +773,10 @@ def create_app(docker_client=None):
         try:
             data = request.get_json() or {}
             user_message = data.get("message", "").strip()
+            img_base64 = data.get("img")  # 可选，图片base64编码
             if not user_message:
                 return jsonify({"error": "message is required"})
-            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 config/ 目录（Use Skill: user-rules）里面"
+            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 config/ 和 control/ 目录（Use Skill: user-rules）里面"
             full_message = f"{system_prompt}\n\n{user_message}"
             log_file = "/logs/hermit/debug.log"
             import tempfile, os, json
@@ -807,16 +808,37 @@ def create_app(docker_client=None):
                 f.write(f"Full message:\n{full_message}\n")
                 f.write(f"Temp file: {tmp_file}\n")
                 f.write(f"API Key present: {'Yes' if 'ANTHROPIC_API_KEY' in env else 'No'}\n")
+                f.write(f"Image present: {'Yes' if img_base64 else 'No'}\n")
 
             import subprocess
+            import base64
+            # 如果有图片，保存到临时文件并在消息中引用
+            img_path = None
+            if img_base64:
+                img_path = tempfile.mktemp(suffix=".png", dir="/home/agent/.claude/workspace/project")
+                try:
+                    img_data = img_base64
+                    if ',' in img_data:
+                        img_data = img_data.split(',')[1]
+                    with open(img_path, "wb") as f:
+                        f.write(base64.b64decode(img_data))
+                    # 在消息中引用图片
+                    with open(tmp_file, "a", encoding="utf-8") as f:
+                        f.write(f"\n\n[图片参考: {img_path}]\n")
+                except Exception as e:
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(f"Image save error: {str(e)}\n")
+
             # 移除 --dangerously-skip-permissions，确保在 root 下也能运行（如果配置了 config.json）
             # 增加 --add-dir /config 以允许访问配置目录
             result = subprocess.run(
-                ["claude", "--continue", "-p", tmp_file, "--add-dir", "/config"],
+                ["claude", "--dangerously-skip-permissions", "--continue", "-p", tmp_file, "--add-dir", "/config"],
                 capture_output=True, text=True, timeout=3600,
                 env=env
             )
             os.unlink(tmp_file)
+            if img_path and os.path.exists(img_path):
+                os.unlink(img_path)
             output = result.stdout
             stderr = result.stderr
             with open(log_file, "a", encoding="utf-8") as f:
