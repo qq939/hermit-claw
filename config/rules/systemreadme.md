@@ -49,7 +49,7 @@
 
    宿主机会通过 SSH/SCP 将 config/rules/ 下的所有文件推送到
    你的 /home/agent/.claude/workspace/project/ 目录下。
-   你可以在这个目录放置项目级的规则文件。
+   这个目录放置的是项目级的规则文件。
 
 ================================================================================
 二、日志规范
@@ -154,60 +154,50 @@ claude 类型可在 /agent-config/settings.json 和 config.json 中配置：
   config.json 的 providers[].settingsConfig.env.ANTHROPIC_AUTH_TOKEN
 
 ================================================================================
-十、Claude Ask 图文模式接口
+十、Claude Ask 图文模式接口（使用 run_claude.js）
 ================================================================================
 
-容器内 Web 服务提供 Claude Ask 图文模式接口：
+run_claude.js 支持图文对话模式。图片通过项目根目录的 tmp.png 文件传递，
+不使用 base64 内联格式。
 
-  POST /api/claude-ask
+### 10.1 工作流程
 
-  请求体（JSON）：
-  {
-    "message": "问题内容（必填）",
-    "img": "图片base64编码（可选）"
-  }
+  1. 调用方将图片写入 /home/agent/.claude/workspace/project/tmp.png
+  2. 调用方设置环境变量 CLAUDE_IMG=1（非空即可）
+  3. run_claude.js 检测到 CLAUDE_IMG 后，在消息中追加图片引用：
+     message += "\n\n![image](file:///home/agent/.claude/workspace/project/tmp.png)"
+  4. Claude 读取 tmp.png 并根据消息内容进行分析
 
-  说明：
-  - message: 用户的问题或指令
-  - img: 可选，图片的 base64 编码（不含前缀）
-    如果包含图片，图片会保存为 workspace/tmp.png，并在消息中引用
+### 10.2 server.js 调用示例
 
-  响应（JSON）：
-  {
-    "response": "Claude 的回复文本"
-  }
+```javascript
+// 先将图片写入项目根目录
+const imgPath = path.join(WORKSPACE_DIR, 'tmp.png');
+fs.writeFileSync(imgPath, imageBuffer);
 
-  注意：
-  - 图片是可选的，没有 img 字段时按纯文本模式处理
-  - 图片格式支持 PNG、JPEG 等常见格式
-  - 图片保存路径：/home/agent/.claude/workspace/project/tmp.png
-  - 图片会在消息末尾自动引用
+const msgB64 = Buffer.from(fullMessage).toString('base64');
 
-================================================================================
-十一、Token 消耗优化（TODO）
-================================================================================
+const child = spawn('node', [path.join(WORKSPACE_DIR, 'run_claude.js')], {
+    cwd: WORKSPACE_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+        ...process.env,
+        ANTHROPIC_DISABLE_PREFLIGHT: '1',
+        CLAUDE_CAPTURE_STDIO: '1',
+        CLAUDE_MSG: msgB64,
+        CLAUDE_IMG: '1'     // 触发图文模式
+    }
+});
+```
 
-| 问题类型 | 出现位置 | 根因 | 优化方案 |
-|---------|---------|------|---------|
-| `You are a helpful assistant...` 前缀重复 | server.js:460/866 | 服务端每次请求自动拼接 systemPrompt | 后端节流：相同请求 5 秒内不重复调用 |
-| `ping` x 12 重复日志 | agent_tui.log 312-382 行 | 健康检查 watchdog + curl 调用 | 后端节流：增加请求间隔限制 |
-| "describe the image" x 5 重复 | 21:26-21:30 区段 | 前端 retry 同一请求 | 前端去重：相同请求 3 秒内不重试 |
+### 10.3 注意事项
 
-优化要求：
-1. 后端 server.js：去掉 systemPrompt 前缀，改为在 run_claude.js 中处理
-2. 后端增加请求节流（throttle）：相同请求 5 秒内不重复执行
-3. 前端 UI 减少 retry 次数：相同请求 3 秒内不重试
-4. 总体目标：减少不必要的 API 调用，降低 token 消耗
-
-================================================================================
-十二、文件操作禁忌
-================================================================================
-
-1. 禁止删除 /home/agent/.claude/workspace/project/logs 目录
-   该目录是 bind mount，删除会导致 "Device or resource busy" 错误。
-2. 禁止覆盖 /agent-config/workspace 目录（会被跳过，但不要手动处理）
-3. 所有持久化文件应放在 /home/agent/.claude/workspace/project/ 下
-4. 不要修改 /agent-config 目录的内容（只读挂载）
+  - 图片必须保存为 /home/agent/.claude/workspace/project/tmp.png
+  - CLAUDE_IMG 环境变量设为任意非空值即可触发
+  - 不设置 CLAUDE_IMG 时，按纯文本模式处理（完全兼容原有逻辑）
+  - 图片引用使用 file:// 绝对路径，不要用 base64 内联
+  - 每次调用前会自动执行 claude --reset 清理会话缓存（避免旧图片引用导致 2013 错误）
+  - run_claude.js 使用 --dangerously-skip-permissions --continue --print 标志运行
 
 ================================================================================
 十一、Git 管理规范（重要！）
@@ -227,11 +217,11 @@ claude 类型可在 /agent-config/settings.json 和 config.json 中配置：
 
 3. 必须维护的文件
    - .gitignore：确保不提交 log/、node_modules/、.DS_Store、__pycache__/ 等
-   - commit.txt：记录每次 commit 的 ID 和标题，格式：
+   - logs/commit.txt：记录每次 commit 的 ID 和标题，格式：
        {commit_id} {commit_title}
      每行一条，持续追加
 
-4. commit.txt 格式示例：
+4. logs/commit.txt 格式示例：
    a1b2c3d4 添加用户认证功能
    e5f6g7h8 修复登录页面样式问题
    i9j0k1l2 更新README文档

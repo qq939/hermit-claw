@@ -1,9 +1,13 @@
 INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
 # Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
+import json
 import os
 import re
 import sys
+import subprocess
+import base64
+import tempfile
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -56,7 +60,6 @@ def create_app(docker_client=None):
     # 容器内将 host.docker.internal 替换为宿主机实际路径（如果是相对路径 ./config）
     host_cfg = app.config["HOST_CONFIG_ROOT"]
     if host_cfg.startswith("./"):
-        import subprocess
         try:
             pwd = subprocess.check_output(["sh", "-c", "echo $PWD"], text=True).strip()
             host_cfg = pwd + host_cfg[1:]
@@ -67,7 +70,6 @@ def create_app(docker_client=None):
     # 处理相对路径 logs
     host_ws = app.config["HOST_WORKSPACES_ROOT"]
     if host_ws.startswith("./"):
-        import subprocess
         try:
             pwd = subprocess.check_output(["sh", "-c", "echo $PWD"], text=True).strip()
             host_ws = pwd + host_ws[1:]
@@ -277,8 +279,10 @@ def create_app(docker_client=None):
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
+        os.makedirs(f"{host_workspaces_root}/{container_name}/sessions", exist_ok=True)
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
+        os.chown(f"{host_workspaces_root}/{container_name}/sessions", 501, 20)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
@@ -359,6 +363,7 @@ def create_app(docker_client=None):
             mem_limit="16g",
             memswap_limit="16g",
             shm_size="8g",
+            device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
         )
 
         if not body.get("skip_initial_message"):
@@ -489,7 +494,7 @@ def create_app(docker_client=None):
         )
         return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
-    def fork_agent(container_name):
+    def fork_agent(container_name, fork_name=None):
         import shutil, traceback
         debug_log = "/logs/hermit/debug.log"
         with open(debug_log, "a", encoding="utf-8") as f:
@@ -506,7 +511,11 @@ def create_app(docker_client=None):
             raise ValueError(f"Unsupported agent type: {agent_type}")
 
         new_host_port = find_next_port()
-        base_name = derive_agent_basename(container_name)
+        # 用户自定义名称优先，否则从源容器名派生
+        if fork_name and fork_name.strip():
+            base_name = _safe_name_part(fork_name.strip())
+        else:
+            base_name = derive_agent_basename(container_name)
         new_container_name = f"{new_host_port}-{base_name}"
 
         src_workspace = f"/workspaces/{container_name}"
@@ -779,7 +788,6 @@ def create_app(docker_client=None):
             system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 config/ 和 control/ 目录（Use Skill: user-rules）里面"
             full_message = f"{system_prompt}\n\n{user_message}"
             log_file = "/logs/hermit/debug.log"
-            import tempfile, os, json
             tmp_file = tempfile.mktemp(suffix=".txt", dir="/app")
             with open(tmp_file, "w", encoding="utf-8") as f:
                 f.write(full_message)
@@ -810,8 +818,6 @@ def create_app(docker_client=None):
                 f.write(f"API Key present: {'Yes' if 'ANTHROPIC_API_KEY' in env else 'No'}\n")
                 f.write(f"Image present: {'Yes' if img_base64 else 'No'}\n")
 
-            import subprocess
-            import base64
             # 如果有图片，保存到临时文件并在消息中引用
             img_path = None
             if img_base64:
@@ -829,10 +835,9 @@ def create_app(docker_client=None):
                     with open(log_file, "a", encoding="utf-8") as f:
                         f.write(f"Image save error: {str(e)}\n")
 
-            # 移除 --dangerously-skip-permissions，确保在 root 下也能运行（如果配置了 config.json）
-            # 增加 --add-dir /config 以允许访问配置目录
+            # hermit 控制面板只做问答，-p 模式不需要权限参数，root 下正常运行
             result = subprocess.run(
-                ["claude", "--dangerously-skip-permissions", "--continue", "-p", tmp_file, "--add-dir", "/config"],
+                ["claude", "-p", tmp_file, "--add-dir", "/config"],
                 capture_output=True, text=True, timeout=3600,
                 env=env
             )
@@ -933,7 +938,7 @@ def create_app(docker_client=None):
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
                 msg_to_send = message or default_msg
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js"
+                script = f"CLAUDE_PERMISSION_MODE=bypassPermissions CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js"
                 try:
                     container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
                     container.exec_run(["/bin/sh", "-lc", f"nohup /tmp/send_msg.sh >> /home/agent/.claude/workspace/project/logs/agent_tui.log 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
@@ -983,9 +988,9 @@ def create_app(docker_client=None):
             labels = ((container.attrs or {}).get("Config", {}) or {}).get("Labels", {}) or {}
             agent_type = labels.get("hermit.agent_type", "")
             if agent_type in ("claude", "ollama"):
-                cmd = "rm -f ~/.claude/projects/*/*.jsonl 2>/dev/null; echo done"
+                cmd = "rm -f ~/.claude/projects/*/*.jsonl ~/.claude/workspace/project/logs/*.log 2>/dev/null; echo done"
             else:
-                cmd = "rm -f ~/.openclaw/projects/*/*.jsonl 2>/dev/null; echo done"
+                cmd = "rm -f ~/.openclaw/projects/*/*.jsonl ~/.openclaw/workspace/project/logs/*.log 2>/dev/null; echo done"
             result = container.exec_run(["/bin/sh", "-lc", cmd], user=AGENT_RUNTIME_USER)
             output = result.output.decode("utf-8", errors="replace").strip()
             return jsonify({"ok": True, "container_name": name, "output": output})
@@ -1063,7 +1068,8 @@ def create_app(docker_client=None):
 
             if commit_hash == "__FORK__":
                 try:
-                    payload = fork_agent(name)
+                    fork_name = data.get("fork_name") or None
+                    payload = fork_agent(name, fork_name=fork_name)
                 except ValueError as e:
                     return jsonify({"error": str(e)}), 400
                 return jsonify({
@@ -1445,6 +1451,7 @@ def create_app(docker_client=None):
           <div class="card-body">
           <div class="actions">
             <button data-action="ssh">SSH终端</button>
+            <button data-action="fork">Fork</button>
             <button data-action="refresh">刷新日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
@@ -1535,6 +1542,25 @@ def create_app(docker_client=None):
           }}
           logBox.textContent += `\n(已发送初始消息)\n`;
         }};
+        div.querySelector('button[data-action="fork"]').onclick = async () => {{
+          const defaultName = item.container_name.replace(/^\\d+-/, '');
+          const input = prompt("请输入新容器名称：", defaultName);
+          if (input === null || !input.trim()) return;
+          const forkName = input.trim();
+          logBox.textContent += `\n[fork ${{forkName}}] 执行中...\n`;
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ commit_hash: "__FORK__", fork_name: forkName }}),
+          }});
+          const d = await r.json();
+          if (!r.ok) {{
+            logBox.textContent += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+            return;
+          }}
+          logBox.textContent += `[fork 完成] 新容器: ${{d.new_container}}\n`;
+          await refreshCards();
+        }};
         div.querySelector('button[data-action="cleanup-context"]').onclick = async () => {{
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/cleanup-context`, {{ method: "POST" }});
           if (!r.ok) {{
@@ -1587,11 +1613,25 @@ def create_app(docker_client=None):
           const gitMode = gitModeSelect ? gitModeSelect.value : "checkout";
           const opLabel = isFork ? "fork" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout");
           const targetLabel = isFork ? item.container_name : hash.substring(0,7);
+          
+          // Fork 时弹出命名对话框
+          let forkName = null;
+          if (isFork) {{
+            const defaultName = item.container_name.replace(/^\\d+-/, '');
+            const input = prompt("请输入新容器名称：", defaultName);
+            if (input === null || !input.trim()) {{
+              gitSelect.value = "";
+              return;
+            }}
+            forkName = input.trim();
+          }}
+          
           logBox.textContent += `\n[${{opLabel}} ${{targetLabel}}] 执行中...\n`;
+          const body = isFork ? {{ commit_hash: hash, fork_name: forkName }} : {{ commit_hash: hash, hard: gitMode === "reset-hard" }};
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ commit_hash: hash, hard: gitMode === "reset-hard" }}),
+            body: JSON.stringify(body),
           }});
           const d = await r.json();
           if (!r.ok) {{

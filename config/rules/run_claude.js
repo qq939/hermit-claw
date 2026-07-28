@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,28 +27,35 @@ try {
 }
 
 // 处理图片（可选）
+// CLAUDE_IMG 可以是文件路径或布尔标记：
+//   - 路径（如 /home/agent/.claude/workspace/project/tmp.png）：优先使用该路径
+//   - 非空值：默认使用项目根目录下的 tmp.png
 if (CLAUDE_IMG) {
-    const imgPath = path.join(WORKSPACE_DIR, 'tmp.png');
-    try {
-        // 确保是有效的 base64 数据
-        let imgData = CLAUDE_IMG;
-        if (imgData.includes(',')) {
-            imgData = imgData.split(',')[1];
-        }
-        const buffer = Buffer.from(imgData, 'base64');
-        fs.writeFileSync(imgPath, buffer);
-        console.error(`[IMG] Image saved to: ${imgPath}`);
-        // 使用 Claude Code 能识别的图片引用格式
+    let imgPath;
+    if (CLAUDE_IMG.includes('/') && fs.existsSync(CLAUDE_IMG)) {
+        imgPath = CLAUDE_IMG;  // 显式路径
+    } else {
+        imgPath = path.join(WORKSPACE_DIR, 'tmp.png');  // 默认
+    }
+    if (fs.existsSync(imgPath)) {
+        console.error(`[IMG] Image found at: ${imgPath}`);
+        // 使用 file:// 绝对路径引用图片（不用 base64）
         message += `\n\n![image](file://${imgPath})`;
-    } catch (e) {
-        console.error('[WARN] Failed to save image:', e.message);
+    } else {
+        console.error(`[IMG] WARN: CLAUDE_IMG set but image not found at: ${imgPath}`);
     }
 }
 
-const child = spawn('claude', ['--dangerously-skip-permissions', '--continue', '--print', '-'], {
+// --permission-mode: 从环境变量 CLAUDE_PERMISSION_MODE 读取，默认 bypassPermissions，阻止 plan mode
+// --dangerously-skip-permissions: 跳过所有安全提示
+// shell: false: 避免 shell 包装导致信号问题
+// cwd: 明确工作目录，让 Claude 在正确目录执行
+const permissionMode = process.env.CLAUDE_PERMISSION_MODE || 'bypassPermissions';
+const child = spawn('claude', ['--permission-mode', permissionMode, '--dangerously-skip-permissions', '--continue', '--print', '-'], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    shell: true,
-    env: { ...process.env, ANTHROPIC_DISABLE_PREFLIGHT: '1' }
+    shell: false,
+    cwd: WORKSPACE_DIR,
+    env: Object.assign({}, process.env, { ANTHROPIC_DISABLE_PREFLIGHT: '1' })
 });
 
 const timeout = setTimeout(() => {
