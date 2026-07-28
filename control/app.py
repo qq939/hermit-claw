@@ -907,7 +907,6 @@ def create_app(docker_client=None):
         except ValueError:
             tail = DEFAULT_TAIL_LINES
         tail = max(1, min(1000, tail))
-        agent_states[name] = "idle"  # 展开卡片时恢复空闲状态
         try:
             container = _require_managed(name)
             return jsonify({"container_name": name, "logs": _tail_logs(container, tail)})
@@ -1520,15 +1519,19 @@ def create_app(docker_client=None):
         const collapseBtn = div.querySelector('.collapse-btn');
         const cardBody = div.querySelector('.card-body');
         collapseBtn.onclick = () => {{
+          const wasCollapsed = div.classList.contains("collapsed");
           div.classList.remove("blink-card");
           div.classList.toggle("collapsed");
           collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
           
-          // 展开卡片时清除状态灯
-          const light = div.querySelector('.status-light');
-          if (light && light.classList.contains('done')) {{
-            light.className = 'status-light idle';
-            fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
+          // 仅在重新打开（折叠→展开）时恢复空闲状态
+          if (wasCollapsed) {{
+            const light = div.querySelector('.status-light');
+            if (light) {{
+              light.className = 'status-light idle';
+              div.classList.remove("blink-card");
+              fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
+            }}
           }}
         }};
         
@@ -1805,16 +1808,21 @@ def create_app(docker_client=None):
                  }}
                }}
             }}
-            // 更新状态灯颜色和闪烁
-            const light = card.querySelector('.status-light');
-            if (light) {{
-              const newState = item.state || 'idle';
-              if (!light.classList.contains(newState)) {{
-                light.className = 'status-light ' + newState;
+            // 仅折叠卡片更新状态灯；已展开卡片保持不变，需重新打开才变绿
+            const isCollapsed = card.classList.contains("collapsed");
+            if (isCollapsed) {{
+              const light = card.querySelector('.status-light');
+              if (light) {{
+                const newState = item.state || 'idle';
+                if (!light.classList.contains(newState)) {{
+                  light.className = 'status-light ' + newState;
+                }}
               }}
             }}
             if (item.state === 'done') {{
               card.classList.add("blink-card");
+            }} else if (!isCollapsed) {{
+              // 展开状态不自动移除闪烁，等重新打开时清除
             }} else {{
               card.classList.remove("blink-card");
             }}
