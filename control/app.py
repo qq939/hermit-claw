@@ -44,6 +44,10 @@ AGENT_RUNTIME_USER = "agent"
 HOST_CONFIG_ROOT_ENV = "HOST_CONFIG_ROOT"
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
 HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
+# agent_states: 容器卡片状态字典，key=container_name, value="idle"|"thinking"|"done"
+# "idle": 空闲（绿色） / "thinking": 思考中（黄色） / "done": 回答完毕（红色+闪烁）
+# 由 send-message(L942) 设 thinking，SessionEnd 钩子(L1008) 设 done，reset-state(L1008) 恢复 idle
+agent_states = {}
 
 
 def now_iso():
@@ -373,6 +377,7 @@ def create_app(docker_client=None):
             user_msg = (body.get("message") or "").strip()
             msg_file = "/tmp/send_msg.sh"
             if agent_type in ("claude", "ollama"):
+                agent_states[name] = "thinking"  # 标记思考中
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
@@ -601,6 +606,7 @@ def create_app(docker_client=None):
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
             "logs": _tail_logs(container, tail=200),
+            "state": agent_states.get(container.name, "idle"),
         }
         return item
 
@@ -901,6 +907,7 @@ def create_app(docker_client=None):
         except ValueError:
             tail = DEFAULT_TAIL_LINES
         tail = max(1, min(1000, tail))
+        agent_states[name] = "idle"  # 展开卡片时恢复空闲状态
         try:
             container = _require_managed(name)
             return jsonify({"container_name": name, "logs": _tail_logs(container, tail)})
@@ -935,6 +942,7 @@ def create_app(docker_client=None):
             agent_type = labels.get("hermit.agent_type", "")
             
             if agent_type in ("claude", "ollama"):
+                agent_states[name] = "thinking"  # 标记思考中（send-message）
                 default_msg = INITIAL_MESSAGE.format(agent="claude")
                 msg_to_send = message or default_msg
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
@@ -1000,6 +1008,18 @@ def create_app(docker_client=None):
             return jsonify({"error": "Container not found"}), 404
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+    @app.post("/api/agents/<path:name>/session-end")
+    def api_session_end(name):
+        """SessionEnd 钩子回调：标记容器回答完毕（红色+闪烁）"""
+        agent_states[name] = "done"
+        return jsonify({"ok": True})
+
+    @app.post("/api/agents/<path:name>/reset-state")
+    def api_reset_state(name):
+        """重置容器卡片状态为空闲（绿色）"""
+        agent_states[name] = "idle"
+        return jsonify({"ok": True})
 
     @app.get("/api/agents/<path:name>/git-commits")
     def api_git_commits(name):
@@ -1265,6 +1285,13 @@ def create_app(docker_client=None):
         box-shadow: 0 0 0 2px rgba(58, 227, 116, 0.3), var(--shadow);
         outline: none;
       }}
+      @keyframes card-blink {{
+        0%, 100% {{ border-color: rgba(255,255,255,0.13); box-shadow: var(--shadow); }}
+        50% {{ border-color: #FF6B6B; box-shadow: 0 0 16px rgba(255,107,107,0.6), var(--shadow); }}
+      }}
+      .card.blink-card {{
+        animation: card-blink 1.2s ease-in-out infinite;
+      }}
       .card.collapsed .card-body {{ display: none; }}
       .collapse-btn {{ background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px; }}
       .card-head {{
@@ -1274,6 +1301,24 @@ def create_app(docker_client=None):
         align-items: center;
         padding: 12px;
         border-bottom: 1px solid rgba(255,255,255,0.11);
+      }}
+      .status-light {{
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-left: 6px;
+        cursor: pointer;
+        transition: background 0.3s, box-shadow 0.3s;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }}
+      .status-light.idle {{ background: #3AE374; box-shadow: 0 0 6px rgba(58,227,116,0.6); }}
+      .status-light.thinking {{ background: #FFD700; box-shadow: 0 0 8px rgba(255,215,0,0.7); animation: pulse-thinking 0.8s ease-in-out infinite; }}
+      .status-light.done {{ background: #FF6B6B; box-shadow: 0 0 10px rgba(255,107,107,0.7); }}
+      @keyframes pulse-thinking {{
+        0%, 100% {{ opacity: 1; }}
+        50% {{ opacity: 0.4; }}
       }}
       .meta {{ color: var(--muted); font-size: 11px; }}
       .git-tools {{
@@ -1446,7 +1491,10 @@ def create_app(docker_client=None):
                 <div class="meta">${{item.agent_type}} · ${{item.host_port}}:{SERVICE_PORT} · SSH:${{item.ssh_port}}</div>
               </div>
             </div>
-            <div class="meta ${{stCls}}" data-status="${{item.status}}" data-port="${{item.host_port}}">${{item.status}}</div>
+            <div class="meta ${{stCls}}" data-status="${{item.status}}" data-port="${{item.host_port}}" style="display:flex;align-items:center;gap:6px;">
+              <span>${{item.status}}</span>
+              <span class="status-light ${{item.state || 'idle'}}" data-action="reset-state" title="点击恢复空闲状态" style="display:inline-block;"></span>
+            </div>
           </div>
           <div class="card-body">
           <div class="actions">
@@ -1466,12 +1514,34 @@ def create_app(docker_client=None):
           <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:400px; border:1px solid #ccc;" src="" allow="fullscreen"></iframe>
           </div>
         `;
+        if (item.state === 'done') {{
+          div.classList.add("blink-card");
+        }}
         const collapseBtn = div.querySelector('.collapse-btn');
         const cardBody = div.querySelector('.card-body');
         collapseBtn.onclick = () => {{
+          div.classList.remove("blink-card");
           div.classList.toggle("collapsed");
           collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
+          
+          // 展开卡片时清除状态灯
+          const light = div.querySelector('.status-light');
+          if (light && light.classList.contains('done')) {{
+            light.className = 'status-light idle';
+            fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
+          }}
         }};
+        
+        // 状态灯点击：恢复空闲状态
+        const statusLight = div.querySelector('.status-light');
+        if (statusLight) {{
+          statusLight.onclick = (e) => {{
+            e.stopPropagation();
+            statusLight.className = 'status-light idle';
+            div.classList.remove("blink-card");
+            fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
+          }};
+        }}
         const logBox = div.querySelector("pre");
         const sshIframe = div.querySelector("iframe");
         const sshBtn = div.querySelector('button[data-action="ssh"]');
@@ -1717,17 +1787,36 @@ def create_app(docker_client=None):
             const stDiv = card.querySelector('.meta[data-status]');
             if (stDiv && stDiv.dataset.status === 'running') {{
                 const port = stDiv.dataset.port;
-                stDiv.innerHTML = `<a href="http://dimond.top:${{port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+                stDiv.querySelector('span').innerHTML = `<a href="http://dimond.top:${{port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
             }}
           }} else {{
-            // 只更新状态和原始日志(如果用户还没交互过)
+            // 更新状态和状态灯
             const st = card.querySelector('.meta[data-status]') || card.querySelector('.meta.status-running, .meta.status-other');
             if (st) {{
                st.className = `meta status-${{item.status === 'running' ? 'running' : 'other'}}`;
-               st.textContent = item.status;
-               if (item.status === 'running') {{
-                   st.innerHTML = `<a href="http://dimond.top:${{item.host_port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+               st.dataset.status = item.status;
+               st.dataset.port = item.host_port;
+               const stSpan = st.querySelector('span');
+               if (stSpan) {{
+                 if (item.status === 'running') {{
+                   stSpan.innerHTML = `<a href="http://dimond.top:${{item.host_port}}" target="_blank" style="color:inherit;text-decoration:underline;" onclick="event.stopPropagation()">running</a>`;
+                 }} else {{
+                   stSpan.textContent = item.status;
+                 }}
                }}
+            }}
+            // 更新状态灯颜色和闪烁
+            const light = card.querySelector('.status-light');
+            if (light) {{
+              const newState = item.state || 'idle';
+              if (!light.classList.contains(newState)) {{
+                light.className = 'status-light ' + newState;
+              }}
+            }}
+            if (item.state === 'done') {{
+              card.classList.add("blink-card");
+            }} else {{
+              card.classList.remove("blink-card");
             }}
             if (!window.cardStates || !window.cardStates[item.container_name]) {{
                const logBox = card.querySelector('pre');
