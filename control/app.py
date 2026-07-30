@@ -1384,17 +1384,25 @@ def create_app(docker_client=None):
         50% {{ opacity: 0.4; }}
       }}
       .meta {{ color: var(--muted); font-size: 11px; }}
-      .profile-select {{
-        font-size: 11px;
-        padding: 4px 8px;
-        background: rgba(255,255,255,0.08);
+      .profile-popup {{
+        position: fixed;
+        z-index: 9999;
+        background: #1a1a2e;
         border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 6px;
-        color: #aaa;
-        cursor: pointer;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+        min-width: 160px;
+        overflow: hidden;
       }}
-      .profile-select:focus {{ outline: none; border-color: #3AE374; }}
-      .profile-select option {{ background: #111; color: #fff; }}
+      .profile-popup div {{
+        padding: 8px 14px;
+        font-size: 12px;
+        cursor: pointer;
+        color: #ccc;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+      }}
+      .profile-popup div:hover {{ background: rgba(58,227,116,0.15); color: #fff; }}
+      .profile-popup div.active {{ color: #3AE374; font-weight: 600; }}
       .git-tools {{
         display: none;
         align-items: center;
@@ -1435,11 +1443,8 @@ def create_app(docker_client=None):
     <header>
       <div class="wrap">
         <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;">
-          <h1 style="margin:0;">HERMIT</h1>
+          <h1 id="hermitLogo" style="margin:0;cursor:pointer;user-select:none;" title="点击切换配置模板">HERMIT</h1>
           <span style="flex:1;"></span>
-          <select id="profileSelect" class="profile-select" title="切换 Claude 配置模板">
-            <option value="">加载中...</option>
-          </select>
           <div style="display:flex;align-items:center;gap:8px;">
             <input id="claudeQuery" placeholder="问个问题..." style="padding:6px 12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;width:300px;" />
             <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
@@ -1541,25 +1546,68 @@ def create_app(docker_client=None):
         }}
       }}
 
-      async function loadProfiles() {{
-        const sel = document.getElementById("profileSelect");
-        try {{
-          const res = await fetch("/api/config/profiles", {{ cache: "no-store" }});
-          const data = await res.json();
-          sel.innerHTML = "";
-          for (const p of data.profiles || []) {{
-            const op = document.createElement("option");
-            op.value = p;
-            op.textContent = p + (p === data.active ? " [当前]" : "");
-            sel.appendChild(op);
+      let profileData = {{ profiles: [], active: "" }};
+
+      function showProfilePopup() {{
+        // 移除已有 popup
+        const old = document.querySelector(".profile-popup");
+        if (old) {{ old.remove(); return; }}
+
+        const h1 = document.getElementById("hermitLogo");
+        const rect = h1.getBoundingClientRect();
+        const popup = document.createElement("div");
+        popup.className = "profile-popup";
+        popup.style.top = (rect.bottom + 4) + "px";
+        popup.style.left = rect.left + "px";
+
+        if (profileData.profiles.length === 0) {{
+          const d = document.createElement("div");
+          d.textContent = "无配置模板";
+          d.style.cursor = "default";
+          d.onclick = (e) => e.stopPropagation();
+          popup.appendChild(d);
+        }} else {{
+          for (const p of profileData.profiles) {{
+            const d = document.createElement("div");
+            d.textContent = p + (p === profileData.active ? " [当前]" : "");
+            if (p === profileData.active) d.className = "active";
+            d.onclick = async (e) => {{
+              e.stopPropagation();
+              popup.remove();
+              if (p === profileData.active) return;
+              const confirmed = confirm(`切换配置文件为 "${{p}}"，将替换 config.json 和 settings.json，确定？`);
+              if (!confirmed) return;
+              try {{
+                const res = await fetch("/api/config/switch-profile", {{
+                  method: "POST",
+                  headers: {{ "Content-Type": "application/json" }},
+                  body: JSON.stringify({{ profile: p }})
+                }});
+                const data = await res.json();
+                if (data.ok) {{ location.reload(); }}
+                else {{ alert("切换失败: " + (data.error || "未知错误")); }}
+              }} catch(err) {{ alert("请求失败: " + err.message); }}
+            }};
+            popup.appendChild(d);
           }}
-          if (!data.profiles || data.profiles.length === 0) {{
-            sel.innerHTML = '<option value="">无配置模板</option>';
-          }}
-        }} catch(err) {{
-          sel.innerHTML = '<option value="">加载失败</option>';
         }}
+
+        document.body.appendChild(popup);
+
+        // 点击其他地方关闭
+        const close = (e) => {{
+          if (!popup.contains(e.target) && e.target !== h1) {{
+            popup.remove();
+            document.removeEventListener("click", close);
+          }}
+        }};
+        setTimeout(() => document.addEventListener("click", close), 0);
       }}
+
+      document.getElementById("hermitLogo").onclick = (e) => {{
+        e.stopPropagation();
+        showProfilePopup();
+      }};
 
       function makeCard(item) {{
         const div = document.createElement("div");
@@ -1963,32 +2011,12 @@ def create_app(docker_client=None):
 
       (async () => {{
         await loadTypes();
-        await loadProfiles();
+        try {{
+          const res = await fetch("/api/config/profiles", {{ cache: "no-store" }});
+          profileData = await res.json();
+        }} catch(err) {{}}
         await refreshCards();
         setInterval(refreshCards, {poll_ms});
-        
-        // Profile 下拉框切换
-        document.getElementById("profileSelect").onchange = async (e) => {{
-          const profile = e.target.value;
-          if (!profile) return;
-          const confirmed = confirm(`切换配置文件为 "${{profile}}"，将替换 config.json 和 settings.json，确定？`);
-          if (!confirmed) {{ location.reload(); return; }}
-          try {{
-            const res = await fetch("/api/config/switch-profile", {{
-              method: "POST",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{ profile }})
-            }});
-            const data = await res.json();
-            if (data.ok) {{
-              location.reload();
-            }} else {{
-              alert("切换失败: " + (data.error || "未知错误"));
-            }}
-          }} catch(err) {{
-            alert("请求失败: " + err.message);
-          }}
-        }};
         
         let tabIndex = 0;
         document.addEventListener('keydown', (e) => {{
