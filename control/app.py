@@ -1523,16 +1523,15 @@ def create_app(docker_client=None):
         const cardBody = div.querySelector('.card-body');
         collapseBtn.onclick = () => {{
           const wasCollapsed = div.classList.contains("collapsed");
-          div.classList.remove("blink-card");
           div.classList.toggle("collapsed");
           collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
           
-          // 仅在重新打开（折叠→展开）时恢复空闲状态
+          // 仅在重新打开（折叠→展开）时消除闪烁、红灯→绿灯
           if (wasCollapsed) {{
+            div.classList.remove("blink-card");
             const light = div.querySelector('.status-light');
             if (light) {{
               light.className = 'status-light idle';
-              div.classList.remove("blink-card");
               fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
             }}
           }}
