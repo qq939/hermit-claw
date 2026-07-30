@@ -349,6 +349,9 @@ def create_app(docker_client=None):
             env_vars["OPENCLAW_GATEWAY_HOST"] = "172.30.0.10"
             env_vars["OPENCLAW_GATEWAY_PORT"] = "18790"
 
+        # SessionEnd 钩子需要正确的容器名，Docker 默认 HOSTNAME 是容器 ID
+        env_vars["HOSTNAME"] = container_name
+
         container = docker_client_or_default().containers.run(
             spec["image"],
             name=container_name,
