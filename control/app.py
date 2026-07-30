@@ -8,8 +8,13 @@ import sys
 import subprocess
 import base64
 import tempfile
+import uuid
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 import docker
 from docker.types import LogConfig
@@ -48,6 +53,54 @@ HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
 # "idle": 空闲（绿色） / "thinking": 思考中（黄色） / "done": 回答完毕（红色+闪烁）
 # 由 send-message(L942) 设 thinking，SessionEnd 钩子(L1008) 设 done，reset-state(L1008) 恢复 idle
 agent_states = {}
+
+# EMAIL_TRACK_FILE: SessionEnd 邮件通知追踪文件，存储 UUID→track_info 映射
+# 用于回复链监控，格式: {"<uuid>": {"container_name":"...", "sent_at":"...", "ttl":"...", "subject_prefix":"...", "reply_chain":[], "last_checked":"..."}}
+EMAIL_TRACK_FILE = os.path.join(os.path.dirname(__file__), "..", "logs", "email_tracks.json")
+# EMAIL_SERVICE_URL: 远程邮件服务基址（email-sender skill 部署地址）
+EMAIL_SERVICE_URL = "http://dimond.top:5030"
+# EMAIL_OWNER: 主人邮箱，通知发送目标 + 回复监控源
+EMAIL_OWNER = "939342547@qq.com"
+# EMAIL_CHECK_INTERVAL: 邮件回复检查间隔（秒），默认 24 小时
+EMAIL_CHECK_INTERVAL = 24 * 3600
+
+
+def _load_email_tracks():
+    try:
+        if os.path.isfile(EMAIL_TRACK_FILE):
+            with open(EMAIL_TRACK_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_email_tracks(tracks):
+    os.makedirs(os.path.dirname(EMAIL_TRACK_FILE), exist_ok=True)
+    with open(EMAIL_TRACK_FILE, "w", encoding="utf-8") as f:
+        json.dump(tracks, f, ensure_ascii=False, indent=2)
+
+def _send_email_via_service(subject, body):
+    """通过远程邮件服务发送邮件，返回 (ok, message)"""
+    try:
+        data = json.dumps({"to": EMAIL_OWNER, "subject": subject, "body": body}).encode("utf-8")
+        req = Request(f"{EMAIL_SERVICE_URL}/send-email/", data=data,
+                       headers={"Content-Type": "application/json"})
+        resp = urlopen(req, timeout=30)
+        result = json.loads(resp.read().decode("utf-8"))
+        return result.get("success", False), result.get("message", "")
+    except Exception as e:
+        return False, str(e)
+
+
+def _fetch_recent_emails(days=1):
+    """从邮件服务拉取最近N天的邮件，返回 [{id, subject, sender, date, body}]"""
+    try:
+        url = f"{EMAIL_SERVICE_URL}/emails/?limit=50&days={days}"
+        resp = urlopen(url, timeout=30)
+        return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return []
 
 
 def now_iso():
@@ -1021,6 +1074,140 @@ def create_app(docker_client=None):
     def api_reset_state(name):
         """重置容器卡片状态为空闲（绿色）"""
         agent_states[name] = "idle"
+        return jsonify({"ok": True})
+
+    @app.post("/api/agents/<path:name>/notify-session-end")
+    def api_notify_session_end(name):
+        """SessionEnd 邮件通知：生成摘要+UUID，发送邮件，建立追踪"""
+        try:
+            container = _require_managed(name)
+        except Exception:
+            return jsonify({"ok": False, "error": "Container not found"}), 404
+        try:
+            agent_type = ((getattr(container, "labels", {}) or {}).get("hermit.agent_type") or "")
+            log_path = log_path_for_agent_type(agent_type)
+            result = container.exec_run(
+                ["/bin/sh", "-lc", f"tail -c 4000 '{log_path}' 2>/dev/null"], user=AGENT_RUNTIME_USER)
+            log_tail = (result.output or b"").decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
+        except Exception:
+            log_tail = ""
+
+        # 提取最后一段摘要（取最后200字符作为简述）
+        summary = log_tail.strip()
+        if len(summary) > 200:
+            summary = summary[-200:]
+        # 取最后一行非空内容作为简述，不超过100字
+        lines = [l.strip() for l in summary.splitlines() if l.strip()]
+        brief = lines[-1] if lines else "任务完成"
+        if len(brief) > 100:
+            brief = brief[:97] + "..."
+
+        track_uuid = str(uuid.uuid4())[:8]
+        subject = f"[Hermit] {name} #{track_uuid}"
+        body = f"容器: {name}\nUUID: {track_uuid}\n摘要: {brief}\n\n---\n此邮件由 Hermit SessionEnd 钩子自动发送。"
+
+        ok, msg = _send_email_via_service(subject, body)
+
+        # 存储追踪信息
+        if ok:
+            tracks = _load_email_tracks()
+            now = datetime.now(timezone.utc).isoformat()
+            ttl = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            tracks[track_uuid] = {
+                "container_name": name,
+                "sent_at": now,
+                "ttl": ttl,
+                "subject_prefix": f"[Hermit] {name} #{track_uuid}",
+                "reply_chain": [],
+                "last_checked": now,
+            }
+            _save_email_tracks(tracks)
+
+        return jsonify({"ok": ok, "uuid": track_uuid, "message": msg})
+
+    def _check_email_replies():
+        """检查所有追踪邮件是否被回复，更新 TTL"""
+        tracks = _load_email_tracks()
+        if not tracks:
+            return
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+        changed = False
+
+        # 拉取最近 2 天的邮件
+        emails = _fetch_recent_emails(days=2)
+
+        for tid, track in list(tracks.items()):
+            ttl_dt = datetime.fromisoformat(track["ttl"])
+            sent_dt = datetime.fromisoformat(track["sent_at"])
+            sent_day = sent_dt.strftime("%Y-%m-%d")
+
+            # TTL 过期 → 停止监控
+            if now > ttl_dt:
+                del tracks[tid]
+                changed = True
+                continue
+
+            # 当天未回复 → 停止监控（仅限发送当天）
+            if sent_day == today_str and now.hour >= 23:
+                # 当天还没结束不急着判死，等 TTL 自然过期
+                pass
+
+            # 搜索回复：匹配 subject 中包含 UUID 前缀的邮件
+            prefix = track.get("subject_prefix", "")
+            for em in emails:
+                subj = em.get("subject", "")
+                body = em.get("body", "")
+                sender = em.get("sender", "")
+                # 回复的特征：subject 包含 UUID（或原 subject），发件人是主人
+                if sender != EMAIL_OWNER:
+                    continue
+                # 检查是否包含 AI 标识，如果有则跳过（不带 ai 标识的主人回复才计入）
+                ai_markers = ["[AI]", "[ai]", "ai-generated", "ai回复", "AI回复"]
+                has_ai = any(m.lower() in subj.lower() or m.lower() in body.lower()[:200] for m in ai_markers)
+                if has_ai:
+                    continue
+                # 匹配：邮件主题包含 uuid 或原始 subject_prefix
+                matched = False
+                if tid in subj or tid in body[:500]:
+                    matched = True
+                elif prefix and prefix in subj:
+                    matched = True
+
+                if matched:
+                    reply_id = em.get("id", "")
+                    chain = track.get("reply_chain", [])
+                    if reply_id and reply_id not in chain:
+                        chain.append(reply_id)
+                        track["reply_chain"] = chain
+                        # 刷新 TTL
+                        track["ttl"] = (now + timedelta(hours=24)).isoformat()
+                        changed = True
+
+            track["last_checked"] = now.isoformat()
+            tracks[tid] = track
+
+        if changed:
+            _save_email_tracks(tracks)
+
+    def _email_monitor_loop():
+        """后台线程：定期检查邮件回复"""
+        while True:
+            time.sleep(EMAIL_CHECK_INTERVAL)
+            try:
+                _check_email_replies()
+            except Exception:
+                pass
+
+    @app.get("/api/email/tracks")
+    def api_email_tracks():
+        """查看当前所有邮件追踪记录"""
+        return jsonify(_load_email_tracks())
+
+    @app.post("/api/email/check-now")
+    def api_email_check_now():
+        """手动触发邮件回复检查"""
+        _check_email_replies()
         return jsonify({"ok": True})
 
     @app.get("/api/config/profiles")
@@ -2077,6 +2264,10 @@ def create_app(docker_client=None):
   </body>
 </html>"""
         return make_response(html)
+
+    # 启动邮件回复监控后台线程
+    monitor_thread = threading.Thread(target=_email_monitor_loop, daemon=True)
+    monitor_thread.start()
 
     return app
 
