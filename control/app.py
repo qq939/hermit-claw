@@ -1112,7 +1112,7 @@ def create_app(docker_client=None):
         if ok:
             tracks = _load_email_tracks()
             now = datetime.now(timezone.utc).isoformat()
-            ttl = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            ttl = (datetime.now(timezone.utc) + timedelta(hours=36)).isoformat()
             tracks[track_uuid] = {
                 "container_name": name,
                 "sent_at": now,
@@ -1181,7 +1181,7 @@ def create_app(docker_client=None):
                         chain.append(reply_id)
                         track["reply_chain"] = chain
                         # 刷新 TTL
-                        track["ttl"] = (now + timedelta(hours=24)).isoformat()
+                        track["ttl"] = (now + timedelta(hours=36)).isoformat()
                         changed = True
 
             track["last_checked"] = now.isoformat()
