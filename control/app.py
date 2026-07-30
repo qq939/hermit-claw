@@ -1633,7 +1633,7 @@ def create_app(docker_client=None):
           <h1 id="hermitLogo" style="margin:0;cursor:pointer;user-select:none;" title="点击切换配置模板">HERMIT</h1>
           <span style="flex:1;"></span>
           <div style="display:flex;align-items:center;gap:8px;">
-            <input id="claudeQuery" placeholder="问个问题..." style="padding:6px 12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;width:300px;" />
+            <input id="claudeQuery" placeholder="问个问题..." style="padding:6px 12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;width:150px;" />
             <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
           </div>
         </div>
