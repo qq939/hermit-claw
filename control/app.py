@@ -1025,15 +1025,18 @@ def create_app(docker_client=None):
 
     @app.get("/api/config/profiles")
     def api_config_profiles():
-        """扫描 config/claude/ 下 config.json.* / settings.json.* 变体文件"""
+        """扫描 config/claude/ 下 config.json.[xxx] / settings.json.[xxx] 变体文件"""
         # 优先用容器内路径 /config，否则用 HOST_CONFIG_ROOT
         config_root = app.config.get("CONFIG_ROOT", "/config")
         config_dir = os.path.join(config_root, "claude")
+        # 正则匹配 config.json.<xxx> 和 settings.json.<xxx>，提取 <xxx> 后缀
+        pattern = re.compile(r"^(?:config|settings)\.json\.(.+)$")
         profiles = set()
         try:
             for f in os.listdir(config_dir):
-                if f.startswith("config.json."):
-                    profiles.add(f[len("config.json."):])
+                m = pattern.match(f)
+                if m:
+                    profiles.add(m.group(1))
         except OSError:
             pass
         # 检测当前激活的是哪个变体（对比 config.json 和 config.json.xxx 内容是否一致）
