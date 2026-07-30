@@ -1023,6 +1023,64 @@ def create_app(docker_client=None):
         agent_states[name] = "idle"
         return jsonify({"ok": True})
 
+    @app.get("/api/config/profiles")
+    def api_config_profiles():
+        """扫描 config/claude/ 下 config.json.* / settings.json.* 变体文件"""
+        # 优先用容器内路径 /config，否则用 HOST_CONFIG_ROOT
+        config_root = app.config.get("CONFIG_ROOT", "/config")
+        config_dir = os.path.join(config_root, "claude")
+        profiles = set()
+        try:
+            for f in os.listdir(config_dir):
+                if f.startswith("config.json."):
+                    profiles.add(f[len("config.json."):])
+        except OSError:
+            pass
+        # 检测当前激活的是哪个变体（对比 config.json 和 config.json.xxx 内容是否一致）
+        active = "unknown"
+        config_path = os.path.join(config_dir, "config.json")
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    current_content = f.read()
+                for p in profiles:
+                    variant_path = os.path.join(config_dir, f"config.json.{p}")
+                    if os.path.isfile(variant_path):
+                        with open(variant_path, "r", encoding="utf-8") as f:
+                            if f.read() == current_content:
+                                active = p
+                                break
+            except OSError:
+                pass
+        return jsonify({"profiles": sorted(profiles), "active": active})
+
+    @app.post("/api/config/switch-profile")
+    def api_config_switch_profile():
+        """将 config.json.<profile> 和 settings.json.<profile> 复制替换到原文件"""
+        data = request.get_json(silent=True) or {}
+        profile = (data.get("profile") or "").strip()
+        if not profile:
+            return jsonify({"error": "Missing profile name"}), 400
+        config_root = app.config.get("CONFIG_ROOT", "/config")
+        config_dir = os.path.join(config_root, "claude")
+        files = [
+            ("config.json", f"config.json.{profile}"),
+            ("settings.json", f"settings.json.{profile}"),
+        ]
+        for target, source in files:
+            src = os.path.join(config_dir, source)
+            dst = os.path.join(config_dir, target)
+            if not os.path.isfile(src):
+                return jsonify({"error": f"Source not found: {source}"}), 404
+            try:
+                with open(src, "r", encoding="utf-8") as f:
+                    content = f.read()
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except OSError as e:
+                return jsonify({"error": f"Failed to write {target}: {e}"}), 500
+        return jsonify({"ok": True, "profile": profile})
+
     @app.get("/api/agents/<path:name>/git-commits")
     def api_git_commits(name):
         try:
@@ -1323,6 +1381,17 @@ def create_app(docker_client=None):
         50% {{ opacity: 0.4; }}
       }}
       .meta {{ color: var(--muted); font-size: 11px; }}
+      .profile-select {{
+        font-size: 11px;
+        padding: 4px 8px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 6px;
+        color: #aaa;
+        cursor: pointer;
+      }}
+      .profile-select:focus {{ outline: none; border-color: #3AE374; }}
+      .profile-select option {{ background: #111; color: #fff; }}
       .git-tools {{
         display: none;
         align-items: center;
@@ -1364,6 +1433,10 @@ def create_app(docker_client=None):
       <div class="wrap">
         <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;">
           <h1 style="margin:0;">HERMIT</h1>
+          <span style="flex:1;"></span>
+          <select id="profileSelect" class="profile-select" title="切换 Claude 配置模板">
+            <option value="">加载中...</option>
+          </select>
           <div style="display:flex;align-items:center;gap:8px;">
             <input id="claudeQuery" placeholder="问个问题..." style="padding:6px 12px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:#fff;width:300px;" />
             <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
@@ -1462,6 +1535,26 @@ def create_app(docker_client=None):
           op.value = item.value;
           op.textContent = item.label;
           agentType.appendChild(op);
+        }}
+      }}
+
+      async function loadProfiles() {{
+        const sel = document.getElementById("profileSelect");
+        try {{
+          const res = await fetch("/api/config/profiles", {{ cache: "no-store" }});
+          const data = await res.json();
+          sel.innerHTML = "";
+          for (const p of data.profiles || []) {{
+            const op = document.createElement("option");
+            op.value = p;
+            op.textContent = p + (p === data.active ? " [当前]" : "");
+            sel.appendChild(op);
+          }}
+          if (!data.profiles || data.profiles.length === 0) {{
+            sel.innerHTML = '<option value="">无配置模板</option>';
+          }}
+        }} catch(err) {{
+          sel.innerHTML = '<option value="">加载失败</option>';
         }}
       }}
 
@@ -1867,8 +1960,32 @@ def create_app(docker_client=None):
 
       (async () => {{
         await loadTypes();
+        await loadProfiles();
         await refreshCards();
         setInterval(refreshCards, {poll_ms});
+        
+        // Profile 下拉框切换
+        document.getElementById("profileSelect").onchange = async (e) => {{
+          const profile = e.target.value;
+          if (!profile) return;
+          const confirmed = confirm(`切换配置文件为 "${{profile}}"，将替换 config.json 和 settings.json，确定？`);
+          if (!confirmed) {{ location.reload(); return; }}
+          try {{
+            const res = await fetch("/api/config/switch-profile", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ profile }})
+            }});
+            const data = await res.json();
+            if (data.ok) {{
+              location.reload();
+            }} else {{
+              alert("切换失败: " + (data.error || "未知错误"));
+            }}
+          }} catch(err) {{
+            alert("请求失败: " + err.message);
+          }}
+        }};
         
         let tabIndex = 0;
         document.addEventListener('keydown', (e) => {{
