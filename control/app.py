@@ -1852,7 +1852,8 @@ def create_app(docker_client=None):
         }}
         const collapseBtn = div.querySelector('.collapse-btn');
         const cardBody = div.querySelector('.card-body');
-        collapseBtn.onclick = () => {{
+        collapseBtn.onclick = (e) => {{
+          e.stopPropagation();
           const wasCollapsed = div.classList.contains("collapsed");
           div.classList.toggle("collapsed");
           collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
