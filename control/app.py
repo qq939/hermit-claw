@@ -1125,6 +1125,57 @@ def create_app(docker_client=None):
 
         return jsonify({"ok": ok, "uuid": track_uuid, "message": msg})
 
+    @app.post("/api/agents/<path:name>/switch-model")
+    def api_switch_model(name):
+        """切换容器模型：写入选定模板的 settings.json 和 config.json，保留 hooks，重启容器"""
+        data = request.get_json(silent=True) or {}
+        profile = (data.get("profile") or "").strip()
+        if not profile:
+            return jsonify({"error": "Missing profile name"}), 400
+        try:
+            container = _require_managed(name)
+        except Exception:
+            return jsonify({"error": "Container not found"}), 404
+
+        config_dir = os.path.join(app.config.get("CONFIG_ROOT", "/config"), "claude")
+        settings_variant = os.path.join(config_dir, f"settings.json.{profile}")
+        config_variant = os.path.join(config_dir, f"config.json.{profile}")
+
+        if not os.path.isfile(settings_variant) or not os.path.isfile(config_variant):
+            return jsonify({"error": f"Profile '{profile}' variants not found"}), 404
+
+        try:
+            with open(settings_variant, "r", encoding="utf-8") as f:
+                settings_content = f.read()
+            with open(config_variant, "r", encoding="utf-8") as f:
+                config_content = f.read()
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+
+        # 替换 hooks 中的 $HOSTNAME 为实际容器名
+        settings_content = settings_content.replace("$HOSTNAME", name)
+
+        # 写入容器
+        def _write_via_exec(dst_path, content):
+            encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+            ec = container.exec_run(
+                ["/bin/sh", "-lc", f"echo '{encoded}' | base64 -d > '{dst_path}'"],
+                user=AGENT_RUNTIME_USER)
+            return ec.exit_code == 0
+
+        if not _write_via_exec("/home/agent/.claude/settings.json", settings_content):
+            return jsonify({"error": "Failed to write settings.json"}), 500
+        if not _write_via_exec("/home/agent/.claude/config.json", config_content):
+            return jsonify({"error": "Failed to write config.json"}), 500
+
+        # 重启容器使配置生效
+        try:
+            container.restart()
+        except Exception as e:
+            return jsonify({"ok": True, "profile": profile, "warning": f"Files written but restart failed: {e}"})
+
+        return jsonify({"ok": True, "profile": profile, "restarted": True})
+
     def _check_email_replies():
         """检查所有追踪邮件是否被回复，更新 TTL"""
         tracks = _load_email_tracks()
@@ -1832,7 +1883,7 @@ def create_app(docker_client=None):
           <div class="card-body">
           <div class="actions">
             <button data-action="ssh">SSH终端</button>
-            <button data-action="fork">Fork</button>
+            <button data-action="switch-model">切换模型</button>
             <button data-action="refresh">刷新日志</button>
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
@@ -1949,24 +2000,67 @@ def create_app(docker_client=None):
           }}
           logBox.textContent += `\n(已发送初始消息)\n`;
         }};
-        div.querySelector('button[data-action="fork"]').onclick = async () => {{
-          const defaultName = item.container_name.replace(/^\\d+-/, '');
-          const input = prompt("请输入新容器名称：", defaultName);
-          if (input === null || !input.trim()) return;
-          const forkName = input.trim();
-          logBox.textContent += `\n[fork ${{forkName}}] 执行中...\n`;
-          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ commit_hash: "__FORK__", fork_name: forkName }}),
-          }});
-          const d = await r.json();
-          if (!r.ok) {{
-            logBox.textContent += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
-            return;
+        div.querySelector('button[data-action="switch-model"]').onclick = async (e) => {{
+          e.stopPropagation();
+          const btn = e.currentTarget;
+          // 移除已有 popup
+          const old = document.querySelector(".model-popup");
+          if (old) {{ old.remove(); return; }}
+
+          const rect = btn.getBoundingClientRect();
+          const popup = document.createElement("div");
+          popup.className = "profile-popup model-popup";
+          popup.style.top = (rect.bottom + 4) + "px";
+          popup.style.left = rect.left + "px";
+
+          const profiles = profileData.profiles || [];
+          if (profiles.length === 0) {{
+            const d = document.createElement("div");
+            d.textContent = "无可用模型";
+            d.style.cursor = "default";
+            popup.appendChild(d);
+          }} else {{
+            for (const p of profiles) {{
+              const d = document.createElement("div");
+              d.textContent = p + (p === profileData.active ? " [当前]" : "");
+              if (p === profileData.active) d.className = "active";
+              d.onclick = async (e2) => {{
+                e2.stopPropagation();
+                popup.remove();
+                if (p === profileData.active) return;
+                const confirmed = confirm(`切换 "${{item.container_name}}" 模型为 "${{p}}" 并重启容器，确定？`);
+                if (!confirmed) return;
+                logBox.textContent += `\n[切换模型 -> ${{p}}] 执行中...\n`;
+                try {{
+                  const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/switch-model`, {{
+                    method: "POST",
+                    headers: {{ "Content-Type": "application/json" }},
+                    body: JSON.stringify({{ profile: p }})
+                  }});
+                  const data = await r.json();
+                  if (data.ok) {{
+                    logBox.textContent += `[完成] 已切换为 ${{p}}，容器已重启\n`;
+                  }} else {{
+                    logBox.textContent += `ERROR: ${{data.error || "未知错误"}}\n`;
+                  }}
+                }} catch(err) {{
+                  logBox.textContent += `ERROR: ${{err.message}}\n`;
+                }}
+                await refreshCards();
+              }};
+              popup.appendChild(d);
+            }}
           }}
-          logBox.textContent += `[fork 完成] 新容器: ${{d.new_container}}\n`;
-          await refreshCards();
+
+          document.body.appendChild(popup);
+
+          const close = (e2) => {{
+            if (!popup.contains(e2.target) && e2.target !== btn) {{
+              popup.remove();
+              document.removeEventListener("click", close);
+            }}
+          }};
+          setTimeout(() => document.addEventListener("click", close), 0);
         }};
         div.querySelector('button[data-action="cleanup-context"]').onclick = async () => {{
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/cleanup-context`, {{ method: "POST" }});
