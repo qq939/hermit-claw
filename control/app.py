@@ -1176,6 +1176,35 @@ def create_app(docker_client=None):
 
         return jsonify({"ok": True, "profile": profile, "restarted": True})
 
+    @app.get("/api/agents/<path:name>/current-model")
+    def api_current_model(name):
+        """读取容器内 settings.json 的 ANTHROPIC_BASE_URL，判断当前激活的模型"""
+        try:
+            container = _require_managed(name)
+        except Exception:
+            return jsonify({"error": "Container not found"}), 404
+        try:
+            result = container.exec_run(
+                ["/bin/sh", "-lc", "cat /home/agent/.claude/settings.json 2>/dev/null"],
+                user=AGENT_RUNTIME_USER)
+            content = (result.output or b"").decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
+            settings = json.loads(content)
+            base_url = settings.get("env", {}).get("ANTHROPIC_BASE_URL", "")
+        except Exception:
+            return jsonify({"model": "unknown", "base_url": ""})
+
+        # 通过 ANTHROPIC_BASE_URL 匹配已知模型
+        model_map = {
+            "api.deepseek.com": "deepseek",
+            "api.minimaxi.com": "minimax",
+        }
+        model = "unknown"
+        for domain, name in model_map.items():
+            if domain in base_url:
+                model = name
+                break
+        return jsonify({"model": model, "base_url": base_url})
+
     def _check_email_replies():
         """检查所有追踪邮件是否被回复，更新 TTL"""
         tracks = _load_email_tracks()
@@ -2003,9 +2032,17 @@ def create_app(docker_client=None):
         div.querySelector('button[data-action="switch-model"]').onclick = async (e) => {{
           e.stopPropagation();
           const btn = e.currentTarget;
-          // 移除已有 popup
           const old = document.querySelector(".model-popup");
           if (old) {{ old.remove(); return; }}
+
+          btn.textContent = "检测中...";
+          let currentModel = "unknown";
+          try {{
+            const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/current-model`);
+            const d = await r.json();
+            currentModel = d.model || "unknown";
+          }} catch(err) {{}}
+          btn.textContent = "切换模型";
 
           const rect = btn.getBoundingClientRect();
           const popup = document.createElement("div");
@@ -2022,12 +2059,12 @@ def create_app(docker_client=None):
           }} else {{
             for (const p of profiles) {{
               const d = document.createElement("div");
-              d.textContent = p + (p === profileData.active ? " [当前]" : "");
-              if (p === profileData.active) d.className = "active";
+              d.textContent = p + (p === currentModel ? " [当前]" : "");
+              if (p === currentModel) d.className = "active";
               d.onclick = async (e2) => {{
                 e2.stopPropagation();
                 popup.remove();
-                if (p === profileData.active) return;
+                if (p === currentModel) return;
                 const confirmed = confirm(`切换 "${{item.container_name}}" 模型为 "${{p}}" 并重启容器，确定？`);
                 if (!confirmed) return;
                 logBox.textContent += `\n[切换模型 -> ${{p}}] 执行中...\n`;
