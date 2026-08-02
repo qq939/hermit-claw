@@ -25,3 +25,6 @@ openai.env
 *.swp
 *.swo
 *~
+temp_*
+tmp_*
+test_tts*
