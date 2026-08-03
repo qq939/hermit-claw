@@ -1,4 +1,12 @@
 INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
+# TOOL_INITIAL_MESSAGE: 工具类容器专属初始提示词（FORK为工具功能部署完成后发送）
+# 与普通容器不同：部署完成后必须到 18081 注册 doc（通过 /tools 接口，规范见 systemreadme.md 第15章）
+# 使用位置：create_agent() 初始消息发送逻辑（tool=True 时替代 INITIAL_MESSAGE）
+TOOL_INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到18081注册doc：调用POST /tools/doc/register接口，请求体为JSON格式，包含name字段（填你的容器名）与content字段（填本工具说明），encoding字段可选，同名注册会自动覆盖并递增version；注册后调用GET /tools/doc/read接口并携带name参数验证已注册的doc。接口访问地址为http://18081/tools/doc/register与http://18081/tools/doc/read，详细规范见systemreadme.md第15章。"
+# TOOL_START_PORT: 工具类容器起始宿主机端口（FORK为工具功能从 18000 开始注册端口）
+TOOL_START_PORT = 18000  # 使用位置：find_tool_port() 端口分配、is_tool() 工具容器判断
+# TOOL_END_PORT: 工具类容器终止宿主机端口
+TOOL_END_PORT = 18079  # 使用位置：find_tool_port() 端口分配上限、is_tool() 工具容器判断
 # Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
 import json
@@ -163,8 +171,11 @@ def create_app(docker_client=None):
         name = getattr(container, "name", "") or ""
         if name.startswith("hermit-tool-"):
             return True
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        if labels.get("hermit.tool") == "true":
+            return True
         port = container_host_port(container)
-        return port is not None and 18000 <= port <= 18079
+        return port is not None and TOOL_START_PORT <= port <= TOOL_END_PORT
 
     def display_containers():
         items = []
@@ -262,6 +273,15 @@ def create_app(docker_client=None):
                 return port
         raise RuntimeError("No available host port in configured range")
 
+    def find_tool_port():
+        # 工具类端口分配：遍历 TOOL_START_PORT..TOOL_END_PORT（18000-18079）
+        # 遍历全部容器（含 hermit-tool-* 非 managed 容器），避免与既有工具端口冲突
+        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
+        for port in range(TOOL_START_PORT, TOOL_END_PORT + 1):
+            if port not in used:
+                return port
+        raise RuntimeError("No available tool host port in configured range")
+
     def project_path_for_agent_type(agent_type):
         if agent_type in ("claude", "ollama"):
             return "/home/agent/.claude/workspace/project"
@@ -327,11 +347,11 @@ def create_app(docker_client=None):
         except Exception:
             pass
 
-    def create_agent(agent_type, custom_name, body=None):
+    def create_agent(agent_type, custom_name, body=None, tool=False):
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
-        host_port = find_next_port()
+        host_port = find_tool_port() if tool else find_next_port()
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
         body = body or {}
@@ -341,6 +361,8 @@ def create_app(docker_client=None):
             "hermit.host_port": str(host_port),
             "hermit.service_port": str(SERVICE_PORT),
         }
+        if tool:
+            labels["hermit.tool"] = "true"
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
@@ -443,15 +465,15 @@ def create_app(docker_client=None):
             user_msg = (body.get("message") or "").strip()
             msg_file = "/tmp/send_msg.sh"
             if agent_type in ("claude", "ollama"):
-                agent_states[name] = "thinking"  # 标记思考中
-                default_msg = INITIAL_MESSAGE.format(agent="claude")
+                agent_states[container_name] = "thinking"  # 标记思考中
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
                 script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
             else:
-                default_msg = INITIAL_MESSAGE.format(agent="openclaw")
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
@@ -648,6 +670,92 @@ def create_app(docker_client=None):
         except Exception as e:
             with open(debug_log, "a", encoding="utf-8") as f:
                 f.write(f"FORK ERROR: {str(e)}\n")
+                f.write(traceback.format_exc())
+            shutil.rmtree(dst_workspace, ignore_errors=True)
+            shutil.rmtree(dst_logs, ignore_errors=True)
+            raise
+
+    def fork_tool_agent(container_name, fork_name=None):
+        # FORK为工具：与 fork 相同流程，但端口从 TOOL_START_PORT(18000) 注册，
+        # 且 create_agent(tool=True) 发送专属初始提示词（部署后到 18081 注册 doc）
+        import shutil, traceback
+        debug_log = "/logs/hermit/debug.log"
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"\n=== FORK_TOOL START: {container_name} ===\n")
+
+        container = docker_client_or_default().containers.get(container_name)
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type") or ""
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"agent_type: {agent_type}\n")
+        if agent_type not in AGENT_SPECS:
+            raise ValueError(f"Unsupported agent type: {agent_type}")
+
+        new_host_port = find_tool_port()
+        if fork_name and fork_name.strip():
+            base_name = _safe_name_part(fork_name.strip())
+        else:
+            base_name = derive_agent_basename(container_name)
+        new_container_name = f"{new_host_port}-{base_name}"
+
+        src_workspace = f"/workspaces/{container_name}"
+        dst_workspace = f"/workspaces/{new_container_name}"
+        dst_logs = f"/logs/{new_container_name}"
+
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"new_host_port: {new_host_port}\n")
+            f.write(f"new_container_name: {new_container_name}\n")
+
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 1: _copy_workspace_tree\n")
+            _copy_workspace_tree(src_workspace, dst_workspace)
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 2: makedirs dst_logs\n")
+            os.makedirs(dst_logs, exist_ok=True)
+            try:
+                os.chown(dst_logs, 501, 20)
+            except Exception:
+                pass
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 3: create_agent (tool=True)\n")
+            body = {"message": ""}  # 不跳过初始消息，发送 TOOL_INITIAL_MESSAGE
+            payload = create_agent(agent_type, base_name, body=body, tool=True)
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"created payload: {payload}\n")
+            created_name = payload["container_name"]
+            if created_name != new_container_name:
+                created_container = docker_client_or_default().containers.get(created_name)
+                created_container.remove(force=True)
+                raise RuntimeError(f"Fork tool expected {new_container_name}, got {created_name}")
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 4: add_frpc_rule\n")
+            add_frpc_rule(payload["host_port"])
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 5: sleep 5\n")
+            project_path = project_path_for_agent_type(agent_type)
+            import time
+            time.sleep(5)
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write("Step 6: scp_rules_to_container\n")
+            scp_rules_to_container(payload["container_name"], project_path)
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK_TOOL SUCCESS: {payload}\n")
+            return payload
+        except FileExistsError as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK_TOOL ERROR: {str(e)}\n")
+            raise ValueError(str(e))
+        except Exception as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"FORK_TOOL ERROR: {str(e)}\n")
                 f.write(traceback.format_exc())
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
@@ -1391,6 +1499,10 @@ def create_app(docker_client=None):
                 "hash": "__FORK__",
                 "message": "****FORK****",
                 "is_current": "",
+            }, {
+                "hash": "__FORK_TOOL__",
+                "message": "******FORK为工具******",
+                "is_current": "",
             }]
             for line in log_lines:
                 if line.strip() and len(line) >= 10:
@@ -1435,6 +1547,20 @@ def create_app(docker_client=None):
                 return jsonify({
                     "ok": True,
                     "mode": "fork",
+                    "container_name": name,
+                    "new_container": payload["container_name"],
+                    "host_port": payload["host_port"],
+                })
+
+            if commit_hash == "__FORK_TOOL__":
+                try:
+                    fork_name = data.get("fork_name") or None
+                    payload = fork_tool_agent(name, fork_name=fork_name)
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
+                return jsonify({
+                    "ok": True,
+                    "mode": "fork_tool",
                     "container_name": name,
                     "new_container": payload["container_name"],
                     "host_port": payload["host_port"],
@@ -2158,13 +2284,14 @@ def create_app(docker_client=None):
           if (!hash) return;
           gitTools.style.display = "none";
           const isFork = hash === "__FORK__";
+          const isForkTool = hash === "__FORK_TOOL__";
           const gitMode = gitModeSelect ? gitModeSelect.value : "checkout";
-          const opLabel = isFork ? "fork" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout");
-          const targetLabel = isFork ? item.container_name : hash.substring(0,7);
+          const opLabel = isFork ? "fork" : (isForkTool ? "fork为工具" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout"));
+          const targetLabel = (isFork || isForkTool) ? item.container_name : hash.substring(0,7);
           
-          // Fork 时弹出命名对话框
+          // Fork / Fork为工具 时弹出命名对话框
           let forkName = null;
-          if (isFork) {{
+          if (isFork || isForkTool) {{
             const defaultName = item.container_name.replace(/^\\d+-/, '');
             const input = prompt("请输入新容器名称：", defaultName);
             if (input === null || !input.trim()) {{
@@ -2175,7 +2302,7 @@ def create_app(docker_client=None):
           }}
           
           logBox.textContent += `\n[${{opLabel}} ${{targetLabel}}] 执行中...\n`;
-          const body = isFork ? {{ commit_hash: hash, fork_name: forkName }} : {{ commit_hash: hash, hard: gitMode === "reset-hard" }};
+          const body = (isFork || isForkTool) ? {{ commit_hash: hash, fork_name: forkName }} : {{ commit_hash: hash, hard: gitMode === "reset-hard" }};
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
@@ -2189,6 +2316,8 @@ def create_app(docker_client=None):
           }}
           if (d.mode === "fork") {{
             logBox.textContent += `[fork 完成] 新容器: ${{d.new_container}}\n`;
+          }} else if (d.mode === "fork_tool") {{
+            logBox.textContent += `[fork为工具 完成] 新容器: ${{d.new_container}}\n`;
           }} else {{
             const doneLabel = d.mode === "hard_reset" ? "git reset --hard 完成" : "git checkout 完成";
             logBox.textContent += `[${{doneLabel}}] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
