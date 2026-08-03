@@ -1745,10 +1745,7 @@ def create_app(docker_client=None):
         box-shadow: var(--shadow);
         transition: border-color 0.2s, box-shadow 0.2s;
       }}
-      .card:focus-within,
-      .card.tab-selected {{
-        border-color: #3AE374;
-        box-shadow: 0 0 0 2px rgba(58, 227, 116, 0.3), var(--shadow);
+      .card:focus-within {{
         outline: none;
       }}
       @keyframes card-blink {{
@@ -2071,17 +2068,11 @@ def create_app(docker_client=None):
         collapseBtn.onclick = (e) => {{
           e.stopPropagation();
           const wasCollapsed = div.classList.contains("collapsed");
-          div.classList.toggle("collapsed");
-          collapseBtn.textContent = div.classList.contains("collapsed") ? "▶" : "▼";
-          
-          // 仅在重新打开（折叠→展开）时消除闪烁、红灯→绿灯
           if (wasCollapsed) {{
-            div.classList.remove("blink-card");
-            const light = div.querySelector('.status-light');
-            if (light) {{
-              light.className = 'status-light idle';
-              fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/reset-state`, {{ method: 'POST' }});
-            }}
+            handleCardExpand(div);
+          }} else {{
+            div.classList.add("collapsed");
+            collapseBtn.textContent = "▶";
           }}
         }};
         
@@ -2412,7 +2403,7 @@ def create_app(docker_client=None):
                  }}
                }}
             }}
-            // 仅折叠卡片更新状态灯；已展开卡片保持不变，需重新打开才变绿
+            // 状态灯：仅折叠卡片从服务器同步；展开卡片保持当前状态不动
             const isCollapsed = card.classList.contains("collapsed");
             if (isCollapsed) {{
               const light = card.querySelector('.status-light');
@@ -2423,10 +2414,9 @@ def create_app(docker_client=None):
                 }}
               }}
             }}
+            // 闪烁同步服务器状态（所有卡片都同步，展开卡也能看到 thinking→done 变化）
             if (item.state === 'done') {{
               card.classList.add("blink-card");
-            }} else if (!isCollapsed) {{
-              // 展开状态不自动移除闪烁，等重新打开时清除
             }} else {{
               card.classList.remove("blink-card");
             }}
@@ -2476,6 +2466,27 @@ def create_app(docker_client=None):
         await refreshCards();
         setInterval(refreshCards, {poll_ms});
         
+        // handleCardExpand: 统一展开卡片 + 如果之前是折叠状态则重置状态灯
+        function handleCardExpand(card) {{
+          const wasCollapsed = card.classList.contains("collapsed");
+          card.classList.remove("collapsed");
+          const btn = card.querySelector('.collapse-btn');
+          if (btn) btn.textContent = '▼';
+          
+          if (wasCollapsed) {{
+            // 重新打开 → 清除 done 闪烁、重置状态灯为 idle
+            card.classList.remove("blink-card");
+            const light = card.querySelector('.status-light');
+            if (light) {{
+              light.className = 'status-light idle';
+            }}
+            const name = card.dataset.name;
+            if (name) {{
+              fetch(`/api/agents/${{encodeURIComponent(name)}}/reset-state`, {{ method: 'POST' }});
+            }}
+          }}
+        }}
+        
         let tabIndex = 0;
         document.addEventListener('keydown', (e) => {{
           if (e.key === 'Tab') {{
@@ -2488,21 +2499,16 @@ def create_app(docker_client=None):
             cardEls.forEach((card, i) => {{
               if (i !== nextIndex) {{
                 card.classList.add('collapsed');
-                card.classList.remove('tab-selected');
                 const btn = card.querySelector('.collapse-btn');
                 if (btn) btn.textContent = '▶';
               }}
             }});
             
             tabIndex = nextIndex;
-            const selected = cardEls[tabIndex];
-            selected.classList.remove('collapsed');
-            selected.classList.add('tab-selected');
-            const btn = selected.querySelector('.collapse-btn');
-            if (btn) btn.textContent = '▼';
+            handleCardExpand(cardEls[tabIndex]);
             
             setTimeout(() => {{
-              const msgInput = selected.querySelector('.cmd-input');
+              const msgInput = cardEls[tabIndex].querySelector('.cmd-input');
               if (msgInput) {{
                 msgInput.focus();
                 msgInput.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
@@ -2520,15 +2526,11 @@ def create_app(docker_client=None):
           cardEls.forEach((c, i) => {{
             if (i !== clickedIndex) {{
               c.classList.add('collapsed');
-              c.classList.remove('tab-selected');
               const btn = c.querySelector('.collapse-btn');
               if (btn) btn.textContent = '▶';
             }}
           }});
-          card.classList.remove('collapsed');
-          card.classList.add('tab-selected');
-          const btn = card.querySelector('.collapse-btn');
-          if (btn) btn.textContent = '▼';
+          handleCardExpand(card);
         }});
       }})();
     </script>
