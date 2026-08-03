@@ -51,6 +51,37 @@ services:
     networks:
       - openclaw-network
 
+  obs-18000:
+    build:
+      context: ./tools/obs
+    container_name: hermit-tool-obs-18000
+    restart: unless-stopped
+    ports:
+      - "18000:8088"
+    environment:
+      - HOST_PORT=18000
+      - TOOLS_HUB_URL=http://host.docker.internal:18081
+    volumes:
+      - ./tools/obs/obs:/app/obs
+      - ./tools/obs/.env:/app/.env:ro
+    networks:
+      - openclaw-network
+
+  email-18001:
+    build:
+      context: ./tools/email
+    container_name: hermit-tool-email-18001
+    restart: unless-stopped
+    ports:
+      - "18001:5030"
+    environment:
+      - HOST_PORT=18001
+      - TOOLS_HUB_URL=http://host.docker.internal:18081
+    volumes:
+      - ./tools/email/asset:/app/asset:ro
+    networks:
+      - openclaw-network
+
   agent-image-claude:
     build:
       context: .

@@ -158,9 +158,19 @@ def create_app(docker_client=None):
     def managed_containers():
         return sorted([c for c in all_containers() if is_managed(c)], key=lambda c: c.name)
 
+    def is_tool(container):
+        """18000-18079 工具类容器，不在 control 面板展示"""
+        name = getattr(container, "name", "") or ""
+        if name.startswith("hermit-tool-"):
+            return True
+        port = container_host_port(container)
+        return port is not None and 18000 <= port <= 18079
+
     def display_containers():
         items = []
         for c in all_containers():
+            if is_tool(c):
+                continue
             if is_managed(c):
                 items.append(c)
                 continue
