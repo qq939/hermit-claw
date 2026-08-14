@@ -46,12 +46,17 @@ if (CLAUDE_IMG) {
     }
 }
 
-// --permission-mode: 从环境变量 CLAUDE_PERMISSION_MODE 读取，默认 bypassPermissions，阻止 plan mode
-// --dangerously-skip-permissions: 跳过所有安全提示
+// --permission-mode: 从环境变量 CLAUDE_PERMISSION_MODE 读取，默认 bypassPermissions
+// --system-prompt: 从环境变量 CLAUDE_SYSTEM_PROMPT 读取，覆盖 system prompt
 // shell: false: 避免 shell 包装导致信号问题
 // cwd: 明确工作目录，让 Claude 在正确目录执行
 const permissionMode = process.env.CLAUDE_PERMISSION_MODE || 'bypassPermissions';
-const child = spawn('claude', ['--permission-mode', permissionMode, '--dangerously-skip-permissions', '--continue', '--print', '-'], {
+const systemPrompt = process.env.CLAUDE_SYSTEM_PROMPT || '';
+const claudeArgs = ['--permission-mode', permissionMode, '--continue', '--print', '-'];
+if (systemPrompt) {
+    claudeArgs.unshift('--system-prompt', systemPrompt);
+}
+const child = spawn('claude', claudeArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
     cwd: WORKSPACE_DIR,
@@ -59,7 +64,7 @@ const child = spawn('claude', ['--permission-mode', permissionMode, '--dangerous
 });
 
 const timeout = setTimeout(() => {
-    console.error('[TIMEOUT] Claude process killed after 60 minutes');
+    console.error('[TIMEOUT] Claude process killed after 48 hours');
     child.kill('SIGTERM');
     setTimeout(() => child.kill('SIGKILL'), 5000);
 }, TIMEOUT_MS);

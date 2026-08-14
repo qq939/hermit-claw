@@ -1,14 +1,25 @@
-INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
+INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
 # TOOL_INITIAL_MESSAGE: 工具类容器专属初始提示词（FORK为工具功能部署完成后发送）
 # 与普通容器不同：部署完成后必须到 18081 注册 doc（通过 /api/tools 接口，规范见 systemreadme.md 第15章）
 # 使用位置：create_agent() 初始消息发送逻辑（tool=True 时替代 INITIAL_MESSAGE）
-TOOL_INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到18081注册doc：调用 POST http://host.docker.internal:18081/api/tools 接口，请求体为JSON格式，包含port字段(填你的宿主机端口)、name字段(工具唯一名称)、display_name(显示名称)、description(简短描述)、doc_md字段(完整Markdown文档，需包含功能概览表格、所有API端点及说明、使用示例)。注册后可调用 GET http://host.docker.internal:18081/api/tools 验证。详细规范见systemreadme.md第十五章（18081 Hub Tools 知识库接口）。"
+TOOL_INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到18081注册doc：调用 POST http://host.docker.internal:18081/api/tools 接口，请求体为JSON格式，包含port字段(填你的宿主机端口)、name字段(工具唯一名称)、display_name(显示名称)、description(简短描述)、doc_md字段(完整Markdown文档，需包含功能概览表格、所有API端点及说明、使用示例)。注册后可调用 GET http://host.docker.internal:18081/api/tools 验证。详细规范见systemreadme.md第十五章（18081 Hub Tools 知识库接口）。"
 # TOOL_START_PORT: 工具类容器起始宿主机端口（FORK为工具功能从 18000 开始注册端口）
 TOOL_START_PORT = 18000  # 使用位置：find_tool_port() 端口分配、is_tool() 工具容器判断
 # TOOL_END_PORT: 工具类容器终止宿主机端口
 TOOL_END_PORT = 18079  # 使用位置：find_tool_port() 端口分配上限、is_tool() 工具容器判断
 # Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
+
+def _d(tag, msg):
+    """Debug 日志：写入 /logs/hermit/debug.log"""
+    try:
+        log_path = "/logs/hermit/debug.log"
+        ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [{tag}] {msg}\n")
+    except Exception:
+        pass
+
 import json
 import os
 import re
@@ -191,13 +202,20 @@ def create_app(docker_client=None):
 
     def container_host_port(container):
         bindings = ((getattr(container, "attrs", {}) or {}).get("HostConfig", {}) or {}).get("PortBindings", {}) or {}
-        values = bindings.get(f"{SERVICE_PORT}/tcp") or []
-        if not values:
-            return None
-        try:
-            return int(values[0].get("HostPort"))
-        except (TypeError, ValueError, AttributeError):
-            return None
+        # 优先查找 8082 端口（claude/ollama agent），找不到则遍历所有端口映射
+        container_ports = bindings.get(f"{SERVICE_PORT}/tcp")
+        if container_ports:
+            try:
+                return int(container_ports[0].get("HostPort"))
+            except (TypeError, ValueError, AttributeError, IndexError):
+                return None
+        # 遍历所有端口映射，取第一个（工具容器可能用 5030 等非 8082 端口）
+        for port_list in bindings.values():
+            if port_list and isinstance(port_list, list):
+                for binding in port_list:
+                    if binding and binding.get("HostPort"):
+                        return int(binding["HostPort"])
+        return None
 
     FRPC_CONFIG_PATH = os.path.join(FRPC_PATH, "frpc.ini")
 
@@ -230,17 +248,22 @@ def create_app(docker_client=None):
 
     def scp_rules_to_container(container_name, project_path):
         rules_dir = "/config/rules"
+        _d("scp", f"container={container_name} project={project_path} rules_dir={rules_dir}")
         if not os.path.exists(rules_dir):
+            _d("scp", f"{rules_dir} does not exist, skipping")
             print(f"[scp] {rules_dir} does not exist, skipping", flush=True, file=sys.stderr)
             return
         files = [f for f in os.listdir(rules_dir) if os.path.isfile(os.path.join(rules_dir, f))]
+        _d("scp", f"files count={len(files)}: {files}")
         if not files:
+            _d("scp", f"no files in {rules_dir}, skipping")
             print(f"[scp] no files in {rules_dir}, skipping", flush=True, file=sys.stderr)
             return
         try:
             import paramiko, socket
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            _d("scp", f"connecting SSH to {container_name}...")
             print(f"[scp] waiting for SSH on {container_name}...", flush=True, file=sys.stderr)
             for attempt in range(1, 16):
                 try:
@@ -252,18 +275,21 @@ def create_app(docker_client=None):
                         raise
                     import time
                     time.sleep(3)
+            _d("scp", "SSH connected")
             sftp = ssh.open_sftp()
             for fname in files:
                 src = os.path.join(rules_dir, fname)
                 dst = os.path.join(project_path, fname)
                 sftp.put(src, dst)
+                _d("scp", f"copied {fname}")
                 print(f"[scp] copied {fname} -> {project_path}/", flush=True, file=sys.stderr)
             sftp.close()
             stdin, stdout, stderr = ssh.exec_command(f"chmod -R +x {project_path} 2>/dev/null || true")
-            print(f"[scp] chmod -R +x {project_path}", flush=True, file=sys.stderr)
             ssh.close()
+            _d("scp", f"done, {len(files)} files copied")
             print(f"[scp] done, {len(files)} files copied", flush=True, file=sys.stderr)
         except Exception as e:
+            _d("scp", f"ERROR: {e}")
             print(f"[scp] ERROR: {e}", flush=True, file=sys.stderr)
 
     def find_next_port():
@@ -332,13 +358,15 @@ def create_app(docker_client=None):
 
     def _copy_workspace_tree(src_dir, dst_dir):
         import subprocess, shutil
+        _d("copy", f"src={src_dir} dst={dst_dir}")
         if not os.path.isdir(src_dir):
             raise FileNotFoundError(f"Source workspace not found: {src_dir}")
         if os.path.exists(dst_dir):
             raise FileExistsError(f"目标工作空间已存在: {dst_dir}，请先删除再试")
-        result = subprocess.run(["cp", "-a", src_dir, dst_dir], capture_output=True, text=True)
+        result = subprocess.run(["cp", "-a", src_dir, dst_dir], capture_output=True, text=True, timeout=3600)
         if result.returncode != 0:
             raise RuntimeError(f"copy failed: {result.stderr}")
+        _d("copy", "cp -a done")
         sessions_dir = os.path.join(dst_dir, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         try:
@@ -346,14 +374,17 @@ def create_app(docker_client=None):
             os.chown(sessions_dir, 501, 20)
         except Exception:
             pass
+        _d("copy", "chown done")
 
     def create_agent(agent_type, custom_name, body=None, tool=False):
+        _d("create", f"ENTRY: type={agent_type} name={custom_name} tool={tool}")
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
         host_port = find_tool_port() if tool else find_next_port()
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
+        _d("create", f"container={container_name} host_port={host_port}")
         body = body or {}
         labels = {
             MANAGED_LABEL_KEY: MANAGED_LABEL_VALUE,
@@ -457,15 +488,16 @@ def create_app(docker_client=None):
             shm_size="8g",
             device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
         )
+        _d("create", f"container.run() done, id={container.id}")
 
         if not body.get("skip_initial_message"):
-            # 创建容器后发送初始消息
+            _d("create", "sending initial message...")
             import time
             time.sleep(3)
             user_msg = (body.get("message") or "").strip()
             msg_file = "/tmp/send_msg.sh"
             if agent_type in ("claude", "ollama"):
-                agent_states[container_name] = "thinking"  # 标记思考中
+                agent_states[container_name] = "thinking"
                 default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
@@ -482,18 +514,23 @@ def create_app(docker_client=None):
             try:
                 ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
                 container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
+                _d("create", "msg written to log")
                 container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
+                _d("create", "script written to /tmp")
                 container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
-            except Exception:
-                pass
+                _d("create", "nohup launched")
+            except Exception as e:
+                _d("create", f"initial message error: {e}")
 
-        return {
+        result = {
             "container_name": container.name,
             "agent_type": agent_type,
             "host_port": host_port,
             "service_port": SERVICE_PORT,
             "created_at": now_iso(),
         }
+        _d("create", f"RETURN: {result}")
+        return result
 
     def recreate_agent(container_name):
         container = docker_client_or_default().containers.get(container_name)
@@ -584,27 +621,26 @@ def create_app(docker_client=None):
             log_config=log_config,
             network="hermit-claw_openclaw-network",
             extra_hosts=["host.docker.internal:host-gateway"],
+            mem_limit="16g",
+            memswap_limit="16g",
+            shm_size="8g",
+            device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
         )
         return {"container_name": new_container.name, "agent_type": agent_type, "host_port": host_port, "ssh_port": host_port - 10000, "service_port": SERVICE_PORT, "recreated_at": now_iso()}
 
     def fork_agent(container_name, fork_name=None):
         import shutil, traceback
-        debug_log = "/logs/hermit/debug.log"
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"\n=== FORK START: {container_name} ===\n")
+        _d("fork", f"=== FORK START: {container_name} ===")
         
         container = docker_client_or_default().containers.get(container_name)
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type") or ""
-        
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"agent_type: {agent_type}\n")
+        _d("fork", f"agent_type={agent_type}")
         
         if agent_type not in AGENT_SPECS:
             raise ValueError(f"Unsupported agent type: {agent_type}")
 
         new_host_port = find_next_port()
-        # 用户自定义名称优先，否则从源容器名派生
         if fork_name and fork_name.strip():
             base_name = _safe_name_part(fork_name.strip())
         else:
@@ -614,31 +650,23 @@ def create_app(docker_client=None):
         src_workspace = f"/workspaces/{container_name}"
         dst_workspace = f"/workspaces/{new_container_name}"
         dst_logs = f"/logs/{new_container_name}"
-
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"src_workspace: {src_workspace}\n")
-            f.write(f"dst_workspace: {dst_workspace}\n")
+        _d("fork", f"src={src_workspace} dst={dst_workspace}")
 
         try:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 1: _copy_workspace_tree\n")
+            _d("fork", "Step1: _copy_workspace_tree")
             _copy_workspace_tree(src_workspace, dst_workspace)
             
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 2: makedirs dst_logs\n")
+            _d("fork", "Step2: makedirs dst_logs")
             os.makedirs(dst_logs, exist_ok=True)
             try:
                 os.chown(dst_logs, 501, 20)
             except Exception:
                 pass
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 3: create_agent\n")
-            body = {"message": ""}  # 不跳过初始消息
+            _d("fork", "Step3: create_agent")
+            body = {"message": ""}
             payload = create_agent(agent_type, base_name, body=body)
-            
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"created payload: {payload}\n")
+            _d("fork", f"payload={payload}")
             
             created_name = payload["container_name"]
             if created_name != new_container_name:
@@ -646,48 +674,35 @@ def create_app(docker_client=None):
                 created_container.remove(force=True)
                 raise RuntimeError(f"Fork expected {new_container_name}, got {created_name}")
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 4: add_frpc_rule\n")
+            _d("fork", "Step4: add_frpc_rule")
             add_frpc_rule(payload["host_port"])
             
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 5: sleep 5\n")
+            _d("fork", "Step5: sleep 5 then scp")
             project_path = project_path_for_agent_type(agent_type)
             import time
             time.sleep(5)
             
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 6: scp_rules_to_container\n")
             scp_rules_to_container(payload["container_name"], project_path)
             
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK SUCCESS: {payload}\n")
+            _d("fork", f"SUCCESS: {payload}")
             return payload
         except FileExistsError as e:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK ERROR: {str(e)}\n")
+            _d("fork", f"ERROR FileExistsError: {e}")
             raise ValueError(str(e))
         except Exception as e:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK ERROR: {str(e)}\n")
-                f.write(traceback.format_exc())
+            _d("fork", f"ERROR: {e}\n{traceback.format_exc()}")
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
             raise
 
     def fork_tool_agent(container_name, fork_name=None):
-        # FORK为工具：与 fork 相同流程，但端口从 TOOL_START_PORT(18000) 注册，
-        # 且 create_agent(tool=True) 发送专属初始提示词（部署后到 18081 注册 doc）
         import shutil, traceback
-        debug_log = "/logs/hermit/debug.log"
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"\n=== FORK_TOOL START: {container_name} ===\n")
+        _d("fork_tool", f"=== FORK_TOOL START: {container_name} ===")
 
         container = docker_client_or_default().containers.get(container_name)
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type") or ""
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"agent_type: {agent_type}\n")
+        _d("fork_tool", f"agent_type={agent_type}")
         if agent_type not in AGENT_SPECS:
             raise ValueError(f"Unsupported agent type: {agent_type}")
 
@@ -696,67 +711,52 @@ def create_app(docker_client=None):
             base_name = _safe_name_part(fork_name.strip())
         else:
             base_name = derive_agent_basename(container_name)
-        new_container_name = f"{new_host_port}-{base_name}"
+        # 工具容器命名：hermit-tool-{name}-{port}
+        new_container_name = f"hermit-tool-{base_name}-{new_host_port}"
 
         src_workspace = f"/workspaces/{container_name}"
         dst_workspace = f"/workspaces/{new_container_name}"
         dst_logs = f"/logs/{new_container_name}"
-
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"new_host_port: {new_host_port}\n")
-            f.write(f"new_container_name: {new_container_name}\n")
+        _d("fork_tool", f"port={new_host_port} name={new_container_name}")
 
         try:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 1: _copy_workspace_tree\n")
+            _d("fork_tool", "Step1: _copy_workspace_tree")
             _copy_workspace_tree(src_workspace, dst_workspace)
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 2: makedirs dst_logs\n")
+            _d("fork_tool", "Step2: makedirs dst_logs")
             os.makedirs(dst_logs, exist_ok=True)
             try:
                 os.chown(dst_logs, 501, 20)
             except Exception:
                 pass
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 3: create_agent (tool=True)\n")
-            body = {"message": ""}  # 不跳过初始消息，发送 TOOL_INITIAL_MESSAGE
+            _d("fork_tool", "Step3: create_agent (tool=True)")
+            body = {"message": ""}
             payload = create_agent(agent_type, base_name, body=body, tool=True)
-
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"created payload: {payload}\n")
+            _d("fork_tool", f"payload={payload}")
             created_name = payload["container_name"]
             if created_name != new_container_name:
                 created_container = docker_client_or_default().containers.get(created_name)
                 created_container.remove(force=True)
                 raise RuntimeError(f"Fork tool expected {new_container_name}, got {created_name}")
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 4: add_frpc_rule\n")
+            _d("fork_tool", "Step4: add_frpc_rule")
             add_frpc_rule(payload["host_port"])
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 5: sleep 5\n")
+            _d("fork_tool", "Step5: sleep 5 then scp")
             project_path = project_path_for_agent_type(agent_type)
             import time
             time.sleep(5)
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write("Step 6: scp_rules_to_container\n")
             scp_rules_to_container(payload["container_name"], project_path)
 
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK_TOOL SUCCESS: {payload}\n")
+            _d("fork_tool", f"SUCCESS: {payload}")
             return payload
         except FileExistsError as e:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK_TOOL ERROR: {str(e)}\n")
+            _d("fork_tool", f"ERROR FileExistsError: {e}")
             raise ValueError(str(e))
         except Exception as e:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"FORK_TOOL ERROR: {str(e)}\n")
-                f.write(traceback.format_exc())
+            _d("fork_tool", f"ERROR: {e}\n{traceback.format_exc()}")
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
             raise
@@ -965,15 +965,32 @@ def create_app(docker_client=None):
             img_base64 = data.get("img")  # 可选，图片base64编码
             if not user_message:
                 return jsonify({"error": "message is required"})
-            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 config/ 和 control/ 目录（Use Skill: user-rules）里面"
+            system_prompt = "我问个问题，不需要改任何代码或者文件，参考文档在 /config 和/logs 目录"
             full_message = f"{system_prompt}\n\n{user_message}"
             log_file = "/logs/hermit/debug.log"
             tmp_file = tempfile.mktemp(suffix=".txt", dir="/app")
             with open(tmp_file, "w", encoding="utf-8") as f:
                 f.write(full_message)
             
-            # 尝试从 config.json 提取 API Key
+            # 读取 settings.json，注入所有环境变量（包括 ANTHROPIC_BASE_URL、API_KEY 等）
             env = os.environ.copy()
+            settings_path = "/config/claude/settings.json"
+            if os.path.exists(settings_path):
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        settings_data = json.load(f)
+                        if "env" in settings_data and isinstance(settings_data["env"], dict):
+                            for k, v in settings_data["env"].items():
+                                if k not in env:
+                                    env[k] = str(v)
+                except Exception:
+                    pass
+
+            # 设置 permission mode 为 bypassPermissions，并覆盖 system prompt
+            env["CLAUDE_PERMISSION_MODE"] = "bypassPermissions"
+            env["CLAUDE_SYSTEM_PROMPT"] = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。"
+
+            # 读取 config.json，提取 ANTHROPIC_AUTH_TOKEN（补充 API_KEY）
             config_path = "/config/claude/config.json"
             if os.path.exists(config_path):
                 try:
@@ -996,6 +1013,7 @@ def create_app(docker_client=None):
                 f.write(f"Full message:\n{full_message}\n")
                 f.write(f"Temp file: {tmp_file}\n")
                 f.write(f"API Key present: {'Yes' if 'ANTHROPIC_API_KEY' in env else 'No'}\n")
+                f.write(f"BASE_URL present: {'Yes' if 'ANTHROPIC_BASE_URL' in env else 'No'}\n")
                 f.write(f"Image present: {'Yes' if img_base64 else 'No'}\n")
 
             # 如果有图片，保存到临时文件并在消息中引用
@@ -1018,7 +1036,7 @@ def create_app(docker_client=None):
             # hermit 控制面板只做问答，-p 模式不需要权限参数，root 下正常运行
             result = subprocess.run(
                 ["claude", "-p", tmp_file, "--add-dir", "/config"],
-                capture_output=True, text=True, timeout=3600,
+                capture_output=True, text=True, timeout=172800,  # 48小时
                 env=env
             )
             os.unlink(tmp_file)
@@ -1032,7 +1050,7 @@ def create_app(docker_client=None):
                 f.write(f"STDERR:\n{stderr}\n")
             return jsonify({"response": output or "(无输出)"})
         except subprocess.TimeoutExpired:
-            return jsonify({"error": "请求超时（10分钟）"})
+            return jsonify({"error": "请求超时（48小时）"})
         except Exception as e:
             return jsonify({"error": str(e)})
 
