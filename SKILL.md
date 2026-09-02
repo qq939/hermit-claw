@@ -3,11 +3,11 @@ name: hermit-claw
 description: 创建容器化的claude agent/openclaw agent，agent对容器赋能，让容器介入智能
 license: Complete terms in LICENSE.txt
 ---
-# 首次调用本技能需要执行命令docker compose up -d --build control-18080 agent-image-claude agent-image-openclaw 
+# 首次调用本技能需要执行命令docker compose up -d --build control-19080 agent-image-claude agent-image-openclaw 
 
-# 18080 Docker Agent 控制技能
+# 19080 Docker Agent 控制技能
 
-本技能用于通过 `http://localhost:18080` 控制和调用各个 Docker agent（`claude` / `openclaw@2026.2.9`）。
+本技能用于通过 `http://localhost:19080` 控制和调用各个 Docker agent（`claude` / `openclaw@2026.2.9`）。
 
 ## 1) 创建 agent
 
@@ -23,8 +23,8 @@ license: Complete terms in LICENSE.txt
 
 - 说明：
   - `type` 仅支持：`claude`、`openclaw@2026.2.9`
-  - 控制端自动分配下一个端口（从 `18081` 递增）
-  - 容器命名格式：`端口号-容器名称`，例如：`18081-writer`
+  - 控制端自动分配下一个端口（从 `19081` 递增）
+  - 容器命名格式：`端口号-容器名称`，例如：`19081-writer`
   - 容器端口固定映射为 `主机端口:8082`
 
 ## 2) 查询容器与卡片日志
@@ -47,10 +47,10 @@ license: Complete terms in LICENSE.txt
   - `exit_code`：命令退出码
   - `output`：命令标准输出/错误输出合并文本
 
-示例（向 `18081-writer` 发命令）：
+示例（向 `19081-writer` 发命令）：
 
 ```bash
-curl -sS -X POST "http://localhost:18080/api/agents/18081-writer/command" \
+curl -sS -X POST "http://localhost:19080/api/agents/19081-writer/command" \
   -H "Content-Type: application/json" \
   -d '{"command":"pwd && ls -la"}'
 ```
@@ -87,7 +87,7 @@ Hermit 平台这两个 API 的理解和实际用法，ssh是兜底用法，实�
 import websocket, time
 
 ws = websocket.create_connection(
-    'wss://hermit.dimond.top/ws/ssh?container=18098-coffeecupgirl', 
+    'wss://hermit.dimond.top/ws/ssh?container=19098-coffeecupgirl', 
     timeout=15
 )
 # 连上后会有 Debian 欢迎信息 + 自动 cd 到 project 目录
@@ -106,7 +106,7 @@ output = ws.recv()
 
 **能做什么**：完整的 shell 权限，可以 `git clone`、`npm install`、启动进程、编辑文件等。
 
-**不能做什么**：看不到外部端口映射的响应（容器内 curl localhost:8082 能通，但外部 dimond.top:18098 返回空）。
+**不能做什么**：看不到外部端口映射的响应（容器内 curl localhost:8082 能通，但外部 dimond.top:19098 返回空）。
 
 ---
 
@@ -125,7 +125,7 @@ output = ws.recv()
 import json, urllib.request
 
 data = json.dumps({
-    'container': '18098-coffeecupgirl',
+    'container': '19098-coffeecupgirl',
     'message': '请执行 pwd'
 }).encode('utf8')
 
@@ -170,7 +170,7 @@ print(result['response'])
 - ✅ npm install
 - ✅ 启动 `node server.js`（日志显示启动成功）
 
-但**外部访问 dimond.top:18098 返回空响应**。可能的原因：
+但**外部访问 dimond.top:19098 返回空响应**。可能的原因：
 1. 容器的 8082 端口映射可能有特殊机制（只映射原 ask server 的进程），换了进程后映射失效
 2. 服务启动后可能很快崩溃（我看到 node 进程变成 zombie/defunct）
 3. 容器内的网络策略限制

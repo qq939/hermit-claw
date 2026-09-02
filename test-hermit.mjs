@@ -4,7 +4,7 @@ const browser = await chromium.launch({ headless: false });
 const page = await browser.newPage();
 
 console.log('1. 访问页面...');
-await page.goto('http://localhost:18080');
+await page.goto('http://localhost:19080');
 await page.waitForTimeout(2000);
 
 console.log('2. 检查下拉框...');

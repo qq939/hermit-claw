@@ -107,13 +107,13 @@ curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己'
 核心三、注册到 Hub — Tools 知识库（对接文档）
 ================================================================================
 
-Hub（18081）是平台统一的对接口径。任何容器都可以把「自己是谁、怎么调用」注册到 Hub，
-注册后调用指南会写入 Hub docs 并展示在 18081 首页，供其他 Agent 查阅。
+Hub（19081）是平台统一的对接口径。任何容器都可以把「自己是谁、怎么调用」注册到 Hub，
+注册后调用指南会写入 Hub docs 并展示在 19081 首页，供其他 Agent 查阅。
 
 ### 注册接口（公共接口规范）
 
 ```
-POST http://host.docker.internal:18081/api/tools
+POST http://host.docker.internal:19081/api/tools
 Content-Type: application/json
 ```
 
@@ -144,9 +144,9 @@ Content-Type: application/json
 ### 查询接口
 
 ```
-GET     http://host.docker.internal:18081/api/tools          # 查询全部
-GET     http://host.docker.internal:18081/api/tools/<name>   # 查询单个
-DELETE  http://host.docker.internal:18081/api/tools/<name>   # 删除单个
+GET     http://host.docker.internal:19081/api/tools          # 查询全部
+GET     http://host.docker.internal:19081/api/tools/<name>   # 查询单个
+DELETE  http://host.docker.internal:19081/api/tools/<name>   # 删除单个
 ```
 
 更多细节（响应字段、持久化位置）见 skill：hermit-tools-hub。
@@ -161,13 +161,13 @@ DELETE  http://host.docker.internal:18081/api/tools/<name>   # 删除单个
 | 二 | 日志规范 | hermit-logging | start.log / agent_tui.log / run.log / ollama.log |
 | 三 | 配置注入机制 | hermit-config | 容器启动时自动执行的配置注入流程 |
 | 四 | Agent 类型差异 | hermit-agent-types | claude / ollama / openclaw 路径差异 |
-| 五 | 服务端口 | hermit-ports | 8082 内部端口、18081-19999 宿主机端口规范 |
+| 五 | 服务端口 | hermit-ports | 8082 内部端口、19081-19999 宿主机端口规范 |
 | 六 | 容器用户身份 | hermit-user | agent (uid=501) 用户与 sudo 权限 |
 | 七 | 初始化消息 | hermit-init | Agent 新会话收到的初始指令 |
 | 八 | 环境变量 | hermit-env | CLAUDE_CODE_* 环境变量与 API 配置 |
 | 十一 | Git 管理规范 | hermit-git | 每次对话后提交、commit.txt、.gitignore |
 | 十二 | 推荐工作流 | hermit-workflow | 开发→调试→更新 README→总结会话 |
 | 十三 | Supabase 数据库 | hermit-supabase | 安装方法、连接池地址、客户端示例 |
-| 十五 | Tools 知识库接口 | hermit-tools-hub | 18081 Hub 对接文档首页、容器卡片可选注册 |
+| 十五 | Tools 知识库接口 | hermit-tools-hub | 19081 Hub 对接文档首页、容器卡片可选注册 |
 
 首次启动时应至少查阅 hermit-paths、hermit-ports、hermit-workflow。

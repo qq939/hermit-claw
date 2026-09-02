@@ -1,8 +1,12 @@
 INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
 # TOOL_INITIAL_MESSAGE: 工具类容器专属初始提示词（FORK为工具功能部署完成后发送）
-# 工具类与普通容器端口不再区分；容器是否注册到 Hub 由用户在 Control 面板卡片上勾选决定（注册=写入调用指南到 Hub docs）。
+# 与普通容器不同：部署完成后必须到 19081 注册 doc（通过 /api/tools 接口，规范见 systemreadme.md 第15章）
 # 使用位置：create_agent() 初始消息发送逻辑（tool=True 时替代 INITIAL_MESSAGE）
-TOOL_INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。你是一个工具类容器，与普通容器端口不再区分；是否注册到{tools_hub_port} Hub（对接文档首页）由用户在 Control 面板卡片上勾选决定，注册即把你的调用指南写入 Hub docs。"
+TOOL_INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到19081注册doc：调用 POST http://host.docker.internal:19081/api/tools 接口，请求体为JSON格式，包含port字段(填你的宿主机端口)、name字段(工具唯一名称)、display_name(显示名称)、description(简短描述)、doc_md字段(完整Markdown文档，需包含功能概览表格、所有API端点及说明、使用示例)。注册后可调用 GET http://host.docker.internal:19081/api/tools 验证。详细规范见systemreadme.md第十五章（19081 Hub Tools 知识库接口）。"
+# TOOL_START_PORT: 工具类容器起始宿主机端口（FORK为工具功能从 19000 开始注册端口）
+TOOL_START_PORT = 19000  # 使用位置：find_tool_port() 端口分配、is_tool() 工具容器判断
+# TOOL_END_PORT: 工具类容器终止宿主机端口
+TOOL_END_PORT = 19079  # 使用位置：find_tool_port() 端口分配上限、is_tool() 工具容器判断
 # Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
 
@@ -35,35 +39,17 @@ import docker
 from docker.types import LogConfig
 from flask import Flask, jsonify, make_response, request, send_file
 from flask_sock import Sock
-
 from tools.hub import registry as tools_hub
 
 # GLOBAL PARAMETERS
-# ---- 端口配置：start_port 从宿主机挂载的 config/hermit_settings.json 读取（默认 18080）----
-# 所有 18xxx 宿主机端口统一按 PORT_OFFSET 偏移；容器内端口（8082/8088/5030/18790/22）不偏移。
-def _load_port_config():
-    for _p in ("/config/hermit_settings.json",
-               os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "hermit_settings.json")):
-        try:
-            if os.path.isfile(_p):
-                with open(_p, "r", encoding="utf-8") as _f:
-                    return json.load(_f)
-        except Exception:
-            continue
-    return {}
-
-_PORT_CFG = _load_port_config()
-# CONTROL_PORT: control 面板宿主机端口（= config.start_port，默认 18080）
-CONTROL_PORT = int(_PORT_CFG.get("start_port", 18080) or 18080)
-# PORT_OFFSET: 相对默认 18080 的端口偏移量，所有 18xxx 宿主机端口统一加此偏移
-PORT_OFFSET = CONTROL_PORT - 18080
-# START_HOST_PORT / END_HOST_PORT: 所有容器（工具类与普通容器统一）宿主机端口段（默认 18081-18999）
-START_HOST_PORT = 18081 + PORT_OFFSET  # 使用位置：find_next_port() 端口分配
-END_HOST_PORT = 18999 + PORT_OFFSET    # 使用位置：find_next_port() 端口分配上限
-# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（默认 18081），提供对接文档首页 + /api/tools 接口
-# 使用位置：TOOL_INITIAL_MESSAGE 占位符替换、create_tools_hub_app() 首页展示、docker-compose 18081:8081 映射
-TOOLS_HUB_PORT = 18081 + PORT_OFFSET
-# SERVICE_PORT: 容器内固定服务端口（不随宿主端口偏移）
+# Used in find_next_port (line 76) as the first generated agent host port.
+START_HOST_PORT = 19081
+# Used in find_next_port (line 76) as the upper bound for generated host ports.
+END_HOST_PORT = 19999
+# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（19081），提供对接文档首页 + /api/tools 接口
+# 使用位置：api_register_agent 注册 doc、__main__ 中 run_hub 线程启动
+TOOLS_HUB_PORT = 19081
+# Used in create_agent (line 123) and API responses to enforce fixed in-container service port.
 SERVICE_PORT = 8082
 # Used in helper filters (line 52, 67) to identify containers created by this control plane.
 MANAGED_LABEL_KEY = "hermit.managed"
@@ -195,13 +181,26 @@ def create_app(docker_client=None):
     def managed_containers():
         return sorted([c for c in all_containers() if is_managed(c)], key=lambda c: c.name)
 
+    def is_tool(container):
+        """19000-19079 工具类容器，不在 control 面板展示"""
+        name = getattr(container, "name", "") or ""
+        if name.startswith("hermit-tool-"):
+            return True
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        if labels.get("hermit.tool") == "true":
+            return True
+        port = container_host_port(container)
+        return port is not None and TOOL_START_PORT <= port <= TOOL_END_PORT
+
     def display_containers():
         items = []
         for c in all_containers():
+            if is_tool(c):
+                continue
             if is_managed(c):
                 items.append(c)
                 continue
-            if is_compose_member(c) and c.name not in (f"hermit-control-{CONTROL_PORT}", "hermit-ssh-gateway", "openclaw-gateway") and c.name.startswith("hermit-agent-"):
+            if is_compose_member(c) and c.name not in ("hermit-control-19080", "hermit-ssh-gateway", "openclaw-gateway") and c.name.startswith("hermit-agent-"):
                 items.append(c)
         return sorted(items, key=lambda c: c.name)
 
@@ -304,6 +303,15 @@ def create_app(docker_client=None):
                 return port
         raise RuntimeError("No available host port in configured range")
 
+    def find_tool_port():
+        # 工具类端口分配：遍历 TOOL_START_PORT..TOOL_END_PORT（19000-19079）
+        # 遍历全部容器（含 hermit-tool-* 非 managed 容器），避免与既有工具端口冲突
+        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
+        for port in range(TOOL_START_PORT, TOOL_END_PORT + 1):
+            if port not in used:
+                return port
+        raise RuntimeError("No available tool host port in configured range")
+
     def project_path_for_agent_type(agent_type):
         if agent_type in ("claude", "ollama"):
             return "/home/agent/.claude/workspace/project"
@@ -377,7 +385,7 @@ def create_app(docker_client=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
-        host_port = find_next_port()
+        host_port = find_tool_port() if tool else find_next_port()
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
         _d("create", f"container={container_name} host_port={host_port}")
@@ -494,14 +502,14 @@ def create_app(docker_client=None):
             msg_file = "/tmp/send_msg.sh"
             if agent_type in ("claude", "ollama"):
                 agent_states[container_name] = "thinking"
-                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="claude", tools_hub_port=TOOLS_HUB_PORT)
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
                 script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
             else:
-                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="openclaw", tools_hub_port=TOOLS_HUB_PORT)
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
@@ -702,7 +710,7 @@ def create_app(docker_client=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError(f"Unsupported agent type: {agent_type}")
 
-        new_host_port = find_next_port()
+        new_host_port = find_tool_port()
         if fork_name and fork_name.strip():
             base_name = _safe_name_part(fork_name.strip())
         else:
@@ -775,9 +783,9 @@ def create_app(docker_client=None):
             "ssh_port": port - 10000 if port else None,
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
-            "registered": tools_hub.get_tool_file(tools_hub.derive_tool_name(container.name)) is not None,
             "logs": _tail_logs(container, tail=200),
             "state": agent_states.get(container.name, "idle"),
+            "registered": tools_hub.get_tool_file(tools_hub.derive_tool_name(container.name)) is not None,
         }
         return item
 
@@ -1715,7 +1723,7 @@ def create_app(docker_client=None):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hermit Control {CONTROL_PORT}</title>
+    <title>Hermit Control 19080</title>
     <style>
       :root {{
         --bg: #070A10;
@@ -1890,7 +1898,7 @@ def create_app(docker_client=None):
             <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
           </div>
         </div>
-        <div class="sub">创建类型：claude / openclaw@2026.2.9；端口从 {START_HOST_PORT} 递增，容器名格式：端口号-容器名称。</div>
+        <div class="sub">创建类型：claude / openclaw@2026.2.9；端口从 19081 递增，容器名格式：端口号-容器名称。</div>
         <div class="panel">
           <div class="row">
             <select id="agentType"></select>
@@ -2420,7 +2428,7 @@ def create_app(docker_client=None):
         }};
         if (!managed) {{
           cmdInput.disabled = true;
-          cmdInput.placeholder = "该容器非{CONTROL_PORT}创建（compose成员），默认只读显示";
+          cmdInput.placeholder = "该容器非19080创建（compose成员），默认只读显示";
           div.querySelector('button[data-action="recreate"]').disabled = true;
         }}
         return div;
@@ -2608,7 +2616,6 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    import threading
     from tools.hub.app import run_hub
     threading.Thread(target=run_hub, kwargs={"tools_hub_port": TOOLS_HUB_PORT}, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)

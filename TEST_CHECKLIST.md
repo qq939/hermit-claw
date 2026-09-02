@@ -5,24 +5,24 @@
 ### 1. 重建并部署
 ```bash
 cd ~/.openclaw/workspace/skills/hermit-claw
-docker compose build control-18080 && docker compose up -d --no-deps control-18080
+docker compose build control-19080 && docker compose up -d --no-deps control-19080
 ```
 
 ### 2. 验证服务可用
 ```bash
-curl -s http://localhost:18080/ | head -5
+curl -s http://localhost:19080/ | head -5
 # 应返回 HTML 页面，不应有 500 错误
 ```
 
 ### 3. 检查日志
 ```bash
-docker logs hermit-control-18080 2>&1 | tail -20
+docker logs hermit-control-19080 2>&1 | tail -20
 # 检查是否有错误
 ```
 
 ### 4. 测试创建容器
 ```bash
-curl -s -X POST http://localhost:18080/api/agents \
+curl -s -X POST http://localhost:19080/api/agents \
   -H "Content-Type: application/json" \
   -d '{"type": "claude", "name": "test-manual"}' | jq .
 # 应返回容器信息
@@ -30,7 +30,7 @@ curl -s -X POST http://localhost:18080/api/agents \
 
 ### 5. 验证下拉框选项
 ```bash
-curl -s http://localhost:18080/api/agent-types | jq .
+curl -s http://localhost:19080/api/agent-types | jq .
 # 应返回 claude 和 openclaw@2026.2.9
 ```
 
@@ -44,7 +44,7 @@ curl -s http://localhost:18080/api/agent-types | jq .
 
 ### 500 Internal Server Error
 ```bash
-docker logs hermit-control-18080
+docker logs hermit-control-19080
 # 查看具体错误
 ```
 

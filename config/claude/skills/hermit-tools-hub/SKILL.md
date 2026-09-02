@@ -1,6 +1,6 @@
-# 十五、18081 Hub Tools 知识库（对接文档首页）
+# 十五、19081 Hub Tools 知识库（对接文档首页）
 
-18081 Hub 是 Hermit 的工具知识库与对接文档中心。所有容器（工具类与普通容器端口统一，不再区分工具段）都可以选择是否注册到 Hub。注册后，该容器的调用指南（Markdown）会写入 Hub docs，并直接展示在 18081 首页上。
+19081 Hub 是 Hermit 的工具知识库与对接文档中心。所有容器（工具类与普通容器端口统一，不再区分工具段）都可以选择是否注册到 Hub。注册后，该容器的调用指南（Markdown）会写入 Hub docs，并直接展示在 19081 首页上。
 
 ## 15.1 注册方式（可选）
 
@@ -14,7 +14,7 @@
 
 ## 15.2 Hub 首页（对接文档）
 
-直接访问 http://dimond.top:18081 即可查看所有已注册容器的对接文档：
+直接访问 http://dimond.top:19081 即可查看所有已注册容器的对接文档：
 
 - 展示每个已注册容器的 display_name / name / 宿主机端口 / 描述 / 调用指南（doc_md）。
 - 暂无已注册容器时显示空提示。
@@ -24,7 +24,7 @@
 **查询全部：**
 
 ```
-GET http://host.docker.internal:18081/api/tools
+GET http://host.docker.internal:19081/api/tools
 ```
 
 响应格式：
@@ -34,11 +34,11 @@ GET http://host.docker.internal:18081/api/tools
   "items": [
     {
       "name": "writer",
-      "port": 18200,
-      "display_name": "18200-writer",
+      "port": 19200,
+      "display_name": "19200-writer",
       "description": "一句话描述",
       "doc_md": "...",
-      "container_name": "18200-writer",
+      "container_name": "19200-writer",
       "agent_type": "claude"
     }
   ]
@@ -48,7 +48,7 @@ GET http://host.docker.internal:18081/api/tools
 **注册单个（公共接口规范，供需要直接注册的 Agent 调用）：**
 
 ```
-POST http://host.docker.internal:18081/api/tools
+POST http://host.docker.internal:19081/api/tools
 Content-Type: application/json
 ```
 
@@ -77,8 +77,8 @@ Hub 内部会把上述公共字段归一化为完整记录（`name` 由 containe
 **查询单个 / 删除单个：**
 
 ```
-GET    http://host.docker.internal:18081/api/tools/<name>
-DELETE http://host.docker.internal:18081/api/tools/<name>
+GET    http://host.docker.internal:19081/api/tools/<name>
+DELETE http://host.docker.internal:19081/api/tools/<name>
 ```
 
 ## 15.4 注意事项
@@ -86,4 +86,4 @@ DELETE http://host.docker.internal:18081/api/tools/<name>
 1. 注册是可选的，由用户在 Control 面板卡片上勾选决定。
 2. 注册表持久化到 config/tools_registry.json（容器内挂载到 /config），重启后仍保留。
 3. doc_md 应尽可能详细说明容器能力、API 端点和用法。
-4. 对接文档可在 18081 Hub 首页可视化查看（http://dimond.top:18081）。
+4. 对接文档可在 19081 Hub 首页可视化查看（http://dimond.top:19081）。

@@ -26,7 +26,7 @@ load_dotenv("asset/.env")
 PORT = int(os.environ.get("PORT", 8088))
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "obs")
 HOST_PORT = int(os.environ.get("HOST_PORT", "0"))
-TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:18081")
+TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:19081")
 
 # OBS 工具注册信息
 OBS_TOOL_INFO = {
@@ -76,7 +76,7 @@ curl http://obs.dimond.top/file.txt -o file.txt
 }
 
 def register_tool():
-    """向 18081 Hub 注册本工具"""
+    """向 19081 Hub 注册本工具"""
     try:
         req = URLRequest(
             f"{TOOLS_HUB_URL}/api/tools",
@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):
     app.state.chunk_dir = os.path.join(app.state.upload_dir, ".chunks")
     os.makedirs(app.state.upload_dir, exist_ok=True)
     os.makedirs(app.state.chunk_dir, exist_ok=True)
-    # 向 18081 Hub 注册工具
+    # 向 19081 Hub 注册工具
     register_tool()
     yield
     # Shutdown

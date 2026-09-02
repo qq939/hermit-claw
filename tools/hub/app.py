@@ -2,7 +2,7 @@
 """Hermit Tools Hub Flask app（19081 对接文档首页 + /api/tools 接口）。
 
 由 control/app.py 通过 `from tools.hub.app import create_tools_hub_app` 引用，
-在 control 容器内监听 8081（宿主机 18081 -> 偏移后 19081）。
+在 control 容器内监听 8081（宿主机 19081）。
 """
 import html
 
@@ -12,7 +12,7 @@ from . import registry
 
 # TOOLS_HUB_PORT_DEFAULT: create_tools_hub_app 首页标题展示的 Hub 端口默认值（可被 control 传入实际端口）
 # 使用位置：create_tools_hub_app() 参数默认值
-TOOLS_HUB_PORT_DEFAULT = 18081
+TOOLS_HUB_PORT_DEFAULT = 19081
 
 
 def create_tools_hub_app(tools_hub_port=TOOLS_HUB_PORT_DEFAULT):
@@ -28,7 +28,7 @@ def create_tools_hub_app(tools_hub_port=TOOLS_HUB_PORT_DEFAULT):
     def hub_register():
         body = request.get_json(silent=True) or {}
         try:
-            record = registry.normalize_tool_payload(body)
+            record = registry.register_tool_file(body)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         return jsonify(record), 200

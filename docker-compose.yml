@@ -19,21 +19,21 @@ services:
       openclaw-network:
         ipv4_address: 172.30.0.10
     ports:
-      - "18790:18790"
+      - "19790:18790"
     volumes:
       - ./config/openclaw:/agent-config:ro
     environment:
       - OPENCLAW_GATEWAY_TOKEN=2ac145e2572b9b2fb44717b520c22588858403a75d4a6ea2
 
-  control-18080:
+  control-19080:
     build:
       context: .
       dockerfile: control/Dockerfile
-    container_name: hermit-control-18080
+    container_name: hermit-control-19080
     restart: unless-stopped
     ports:
-      - "18080:8080"
-      - "18081:8081"
+      - "19080:8080"
+      - "19081:8081"
     environment:
       - HOST_CONFIG_ROOT=${PWD}/config
       - HOST_WORKSPACES_ROOT=${PWD}/workspaces
@@ -53,32 +53,32 @@ services:
     networks:
       - openclaw-network
 
-  obs-18000:
+  obs-19000:
     build:
       context: ./tools/obs
-    container_name: hermit-tool-obs-18000
+    container_name: hermit-tool-obs-19000
     restart: unless-stopped
     ports:
-      - "18000:8088"
+      - "19000:8088"
     environment:
-      - HOST_PORT=18000
-      - TOOLS_HUB_URL=http://host.docker.internal:18081
+      - HOST_PORT=19000
+      - TOOLS_HUB_URL=http://host.docker.internal:19081
     volumes:
       - ./tools/obs/obs:/app/obs
       - ./tools/obs/.env:/app/.env:ro
     networks:
       - openclaw-network
 
-  email-18001:
+  email-19001:
     build:
       context: ./tools/email
-    container_name: hermit-tool-email-18001
+    container_name: hermit-tool-email-19001
     restart: unless-stopped
     ports:
-      - "18001:5030"
+      - "19001:5030"
     environment:
-      - HOST_PORT=18001
-      - TOOLS_HUB_URL=http://host.docker.internal:18081
+      - HOST_PORT=19001
+      - TOOLS_HUB_URL=http://host.docker.internal:19081
     volumes:
       - ./tools/email/asset:/app/asset:ro
     networks:
@@ -115,7 +115,7 @@ services:
     container_name: hermit-ssh-gateway
     restart: unless-stopped
     ports:
-      - "18800:8080"
+      - "19800:8080"
     environment:
       - DOCKER_HOST=host.docker.internal
       - SSH_USER=agent
