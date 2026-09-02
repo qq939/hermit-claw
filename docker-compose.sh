@@ -4,7 +4,8 @@
 #   1) 从 config/hermit_settings.json 读取起始端口 start_port
 #   2) 恢复 docker-compose.yml 为默认占位状态（18080）
 #   3) 将 docker-compose.yml 中的 18080 动态替换为 start_port
-#   4) 执行 docker compose 部署 control 服务
+#   4) 构建 agent 模板镜像（带 profiles: ["templates"]，默认 up 不构建，需显式构建）
+#   5) 执行 docker compose 部署 control 服务
 # 说明：端口来自配置文件，不硬编码，修改 hermit_settings.json 后重新运行即可生效。
 
 set -euo pipefail
@@ -38,7 +39,11 @@ sed -i.bak "s/18080/$PORT/g" "$COMPOSE_PATH"
 rm -f "$COMPOSE_PATH.bak"
 echo "已将 docker-compose.yml 中的 18080 替换为 $PORT"
 
-# 4. 部署 control 服务
+# 4. 构建 agent 模板镜像（带 profiles: ["templates"]，默认 up 不构建，需显式构建）
+echo "构建 agent 模板镜像..."
+docker compose build agent-image-claude agent-image-openclaw agent-image-ollama
+
+# 5. 部署 control 服务
 echo "开始部署 control-$PORT 服务..."
 docker compose up -d --build "control-$PORT"
 
