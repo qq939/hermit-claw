@@ -43,6 +43,7 @@ def derive_tool_name(container_name):
 def build_usage_guide(container_name, host_port, agent_type, description=""):
     """生成容器调用指南（Markdown），写入 19081 Hub docs。"""
     display = container_name or "unnamed"
+    port_str = str(host_port) if host_port is not None else "未知"
     desc = (description or "").strip() or "%s 容器（%s）" % (agent_type or "unknown", display)
     lines = [
         "# %s" % display,
@@ -51,8 +52,8 @@ def build_usage_guide(container_name, host_port, agent_type, description=""):
         "|------|----|",
         "| 容器名称 | `%s` |" % display,
         "| 类型 | `%s` |" % (agent_type or "unknown"),
-        "| 宿主机端口 | `%s` |" % host_port,
-        "| 访问地址 | http://dimond.top:%s |" % host_port,
+        "| 宿主机端口 | `%s` |" % port_str,
+        "| 访问地址 | http://dimond.top:%s |" % port_str,
         "",
         "## 简介",
         "",
@@ -60,7 +61,7 @@ def build_usage_guide(container_name, host_port, agent_type, description=""):
         "",
         "## 调用方式",
         "",
-        "通过宿主机端口 `%s` 访问该容器提供的服务。" % host_port,
+        "通过宿主机端口 `%s` 访问该容器提供的服务。" % port_str,
         "",
     ]
     return "\n".join(lines)
@@ -78,6 +79,34 @@ def build_tool_record(container_name, host_port, agent_type, description=""):
         "container_name": container_name,
         "agent_type": agent_type,
     }
+
+
+def normalize_tool_payload(body):
+    """把 POST /api/tools 的请求体归一化为工具注册记录（公共接口规范）。
+
+    公共接口（推荐，供 Agent / 容器卡片调用）：
+        {
+          "container_name": "19082-writer",   # 必填：容器名，派生唯一 name
+          "host_port": 19082,                 # 可选：宿主机端口
+          "agent_type": "claude",             # 可选：容器类型 claude/ollama/openclaw
+          "description": "一句话描述"          # 可选：简介，写入 doc_md
+        }
+
+    兼容旧格式（直接传完整记录，原样直通）：
+        { "name": "...", "port": 0, "display_name": "...", "description": "...", "doc_md": "..." }
+    """
+    body = body or {}
+    if isinstance(body, dict) and ("container_name" in body or "host_port" in body or "agent_type" in body):
+        container_name = str(body.get("container_name") or "").strip()
+        if not container_name:
+            raise ValueError("container_name is required")
+        host_port = body.get("host_port")
+        if host_port in (None, ""):
+            host_port = None
+        agent_type = str(body.get("agent_type") or "unknown")
+        description = str(body.get("description") or "")
+        return build_tool_record(container_name, host_port, agent_type, description)
+    return body
 
 
 def _default_registry():

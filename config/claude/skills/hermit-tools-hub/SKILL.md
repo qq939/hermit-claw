@@ -45,24 +45,34 @@ GET http://host.docker.internal:18081/api/tools
 }
 ```
 
-**注册单个（可选，供需要直接注册的 Agent 调用）：**
+**注册单个（公共接口规范，供需要直接注册的 Agent 调用）：**
 
 ```
 POST http://host.docker.internal:18081/api/tools
 Content-Type: application/json
 ```
 
-请求体：
+请求体使用公共字段（`container_name` 必填，其余可选）：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| container_name | 是 | 容器名，Hub 据此派生唯一 `name` |
+| host_port | 否 | 宿主机访问端口 |
+| agent_type | 否 | 容器类型：claude / ollama / openclaw |
+| description | 否 | 一句话描述，写入 doc_md |
 
 ```json
 {
-  "port": 18200,
-  "name": "工具唯一名称",
-  "display_name": "显示名称",
-  "description": "一句话描述",
-  "doc_md": "## 功能概览\n..."
+  "container_name": "19082-writer",
+  "host_port": 19082,
+  "agent_type": "claude",
+  "description": "写作工具，提供 /ask/claude 接口"
 }
 ```
+
+Hub 内部会把上述公共字段归一化为完整记录（`name` 由 container_name 派生，
+`port` 取自 host_port，`doc_md` 自动生成）。也可直接传完整记录（`name`/`port`/
+`display_name`/`description`/`doc_md`），Hub 原样接收。
 
 **查询单个 / 删除单个：**
 

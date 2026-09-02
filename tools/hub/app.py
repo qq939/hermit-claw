@@ -28,7 +28,7 @@ def create_tools_hub_app(tools_hub_port=TOOLS_HUB_PORT_DEFAULT):
     def hub_register():
         body = request.get_json(silent=True) or {}
         try:
-            record = registry.register_tool_file(body)
+            record = registry.normalize_tool_payload(body)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         return jsonify(record), 200

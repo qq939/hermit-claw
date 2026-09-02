@@ -104,6 +104,54 @@ curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己'
 - 失败：错误信息（500）
 
 ================================================================================
+核心三、注册到 Hub — Tools 知识库（对接文档）
+================================================================================
+
+Hub（18081）是平台统一的对接口径。任何容器都可以把「自己是谁、怎么调用」注册到 Hub，
+注册后调用指南会写入 Hub docs 并展示在 18081 首页，供其他 Agent 查阅。
+
+### 注册接口（公共接口规范）
+
+```
+POST http://host.docker.internal:18081/api/tools
+Content-Type: application/json
+```
+
+请求体使用以下公共字段（`container_name` 必填，其余可选）：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| container_name | 是 | 容器名，Hub 会据此派生唯一 `name`（如 `19082-writer` → `writer`）|
+| host_port | 否 | 宿主机访问端口 |
+| agent_type | 否 | 容器类型：claude / ollama / openclaw |
+| description | 否 | 一句话描述，写入调用指南 |
+
+```json
+{
+  "container_name": "19082-writer",
+  "host_port": 19082,
+  "agent_type": "claude",
+  "description": "写作工具，提供 /ask/claude 接口"
+}
+```
+
+### 其他方式
+
+- 在 Control 面板的容器卡片上勾选「注册」复选框，面板会自动调用
+  `POST /api/agents/<容器名>/register` 完成注册；取消勾选则注销。
+- 同名容器重复注册会覆盖旧记录。
+
+### 查询接口
+
+```
+GET     http://host.docker.internal:18081/api/tools          # 查询全部
+GET     http://host.docker.internal:18081/api/tools/<name>   # 查询单个
+DELETE  http://host.docker.internal:18081/api/tools/<name>   # 删除单个
+```
+
+更多细节（响应字段、持久化位置）见 skill：hermit-tools-hub。
+
+================================================================================
 其他规范索引（按需查阅 /agent-config/skills/）
 ================================================================================
 
