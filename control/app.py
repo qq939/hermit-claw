@@ -17,7 +17,6 @@ def _d(tag, msg):
         pass
 
 import json
-import html
 import os
 import re
 import sys
@@ -37,7 +36,7 @@ from docker.types import LogConfig
 from flask import Flask, jsonify, make_response, request, send_file
 from flask_sock import Sock
 
-import tools_hub
+from tools.hub import registry as tools_hub
 
 # GLOBAL PARAMETERS
 # ---- 端口配置：start_port 从宿主机挂载的 config/hermit_settings.json 读取（默认 18080）----
@@ -2605,93 +2604,11 @@ def create_app(docker_client=None):
     return app
 
 
-def create_tools_hub_app():
-    """19081 工具 Hub（对接文档）：首页展示已注册工具的调用指南，并提供 /api/tools 接口。"""
-    hub = Flask("hermit_tools_hub")
-    hub.config["JSON_AS_ASCII"] = False
-
-    @hub.get("/api/tools")
-    def hub_list():
-        return jsonify({"items": tools_hub.list_tools_file()})
-
-    @hub.post("/api/tools")
-    def hub_register():
-        body = request.get_json(silent=True) or {}
-        try:
-            record = tools_hub.register_tool_file(body)
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-        return jsonify(record), 200
-
-    @hub.get("/api/tools/<name>")
-    def hub_get(name):
-        record = tools_hub.get_tool_file(name)
-        if record is None:
-            return jsonify({"error": "not found"}), 404
-        return jsonify(record)
-
-    @hub.delete("/api/tools/<name>")
-    def hub_delete(name):
-        removed = tools_hub.unregister_tool_file(name)
-        return jsonify({"ok": True, "removed": bool(removed)})
-
-    @hub.get("/")
-    def hub_index():
-        items = tools_hub.list_tools_file()
-        if not items:
-            body = "<p>暂无已注册的工具。可在 Control 面板容器卡片上勾选「注册」写入调用指南。</p>"
-        else:
-            rows = []
-            for t in items:
-                name = html.escape(str(t.get("name") or ""))
-                display = html.escape(str(t.get("display_name") or name))
-                desc = html.escape(str(t.get("description") or ""))
-                port = t.get("port")
-                doc = html.escape(str(t.get("doc_md") or ""))
-                rows.append(
-                    f"<section class='tool'>"
-                    f"<h2>{display}</h2>"
-                    f"<div class='meta'>名称：{name} · 端口：{port} · {desc}</div>"
-                    f"<pre>{doc}</pre>"
-                    f"</section>"
-                )
-            body = "\n".join(rows)
-        page = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Hermit Tools Hub {TOOLS_HUB_PORT}</title>
-<style>
-body {{ margin:0; background:#070A10; color:rgba(255,255,255,0.92); font-family:ui-monospace,Menlo,Consolas,monospace; }}
-.wrap {{ max-width:1000px; margin:0 auto; padding:24px 18px; }}
-h1 {{ font-size:18px; }}
-.tool {{ margin-top:16px; border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:14px; background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03)); }}
-.tool h2 {{ margin:0 0 6px; font-size:15px; }}
-.tool .meta {{ color:rgba(255,255,255,0.6); font-size:12px; margin-bottom:10px; }}
-pre {{ margin:0; padding:12px; background:rgba(0,0,0,0.3); border-radius:8px; overflow:auto; font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-word; }}
-</style>
-</head>
-<body>
-<div class="wrap">
-<h1>Hermit Tools Hub · 对接文档</h1>
-{body}
-</div>
-</body>
-</html>"""
-        return page, 200, {"Content-Type": "text/html; charset=utf-8"}
-
-    return hub
-
-
 app = create_app()
-tools_hub_app = create_tools_hub_app()
 
 
 if __name__ == "__main__":
     import threading
-    from werkzeug.serving import make_server
-    hub_server = make_server("0.0.0.0", 8081, tools_hub_app, threaded=True)
-    threading.Thread(target=hub_server.serve_forever, daemon=True).start()
-    print("[tools-hub] listening on 8081", flush=True)
+    from tools.hub.app import run_hub
+    threading.Thread(target=run_hub, kwargs={"tools_hub_port": TOOLS_HUB_PORT}, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)

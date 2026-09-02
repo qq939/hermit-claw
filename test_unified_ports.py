@@ -29,6 +29,7 @@ def read(rel):
 def main():
     app_src = read("control/app.py")
     compose = read("docker-compose.yml")
+    hub_app_src = read("tools/hub/app.py")
 
     # --- 端口段不再区分 ---
     assert "TOOL_START_PORT" not in app_src, "应移除工具端口段起点 TOOL_START_PORT"
@@ -39,12 +40,13 @@ def main():
     # --- 统一端口分配 ---
     assert "host_port = find_next_port()" in app_src, "create_agent 应统一走 find_next_port()"
 
-    # --- 引入 tools_hub 模块 ---
-    assert "import tools_hub" in app_src, "app.py 应引入 tools_hub 模块"
+    # --- 引入 tools.hub 模块 ---
+    assert "from tools.hub" in app_src, "app.py 应从 tools.hub 引入 hub 源码"
 
     # --- 19081 Hub 服务（第二个服务 8081）---
-    assert "/api/tools" in app_src, "应存在 /api/tools 路由"
-    assert 'make_server("0.0.0.0", 8081' in app_src, "Hub 服务应监听 8081"
+    assert "/api/tools" in hub_app_src, "tools/hub/app.py 应存在 /api/tools 路由"
+    assert "make_server" in hub_app_src, "tools/hub/app.py 应包含 Hub 启动逻辑 make_server"
+    assert "8081" in hub_app_src, "tools/hub/app.py 应监听 8081"
 
     # --- 卡片注册接口 ---
     assert "register_tool_file" in app_src, "卡片注册应调用 tools_hub.register_tool_file"

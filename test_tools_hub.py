@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""control/tools_hub.py 的 TDD 测试（纯标准库，自带超时机制）。
+"""tools/hub/registry.py 的 TDD 测试（纯标准库，自带超时机制）。
 
 验证：
   - derive_tool_name 从容器名派生工具唯一名
@@ -19,9 +19,9 @@ except Exception:
     pass
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(ROOT, "control"))
+sys.path.insert(0, ROOT)
 
-import tools_hub  # noqa: E402
+from tools.hub import registry as tools_hub  # noqa: E402
 
 
 def main():

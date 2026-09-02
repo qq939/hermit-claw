@@ -10,11 +10,11 @@ RUN npm install -g @anthropic-ai/claude-code@2.0.69
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+COPY control/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY app.py /app/app.py
-COPY tools_hub.py /app/tools_hub.py
+COPY control/app.py /app/app.py
+COPY tools/hub /app/tools/hub
 
 RUN ln -s /config /app/config
 

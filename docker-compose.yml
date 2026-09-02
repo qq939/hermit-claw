@@ -27,7 +27,8 @@ services:
 
   control-18080:
     build:
-      context: ./control
+      context: .
+      dockerfile: control/Dockerfile
     container_name: hermit-control-18080
     restart: unless-stopped
     ports:
