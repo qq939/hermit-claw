@@ -113,13 +113,13 @@ curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己'
 | 二 | 日志规范 | hermit-logging | start.log / agent_tui.log / run.log / ollama.log |
 | 三 | 配置注入机制 | hermit-config | 容器启动时自动执行的配置注入流程 |
 | 四 | Agent 类型差异 | hermit-agent-types | claude / ollama / openclaw 路径差异 |
-| 五 | 服务端口 | hermit-ports | 8082 内部端口、18000-19999 宿主机端口规范 |
+| 五 | 服务端口 | hermit-ports | 8082 内部端口、18081-19999 宿主机端口规范 |
 | 六 | 容器用户身份 | hermit-user | agent (uid=501) 用户与 sudo 权限 |
 | 七 | 初始化消息 | hermit-init | Agent 新会话收到的初始指令 |
 | 八 | 环境变量 | hermit-env | CLAUDE_CODE_* 环境变量与 API 配置 |
 | 十一 | Git 管理规范 | hermit-git | 每次对话后提交、commit.txt、.gitignore |
 | 十二 | 推荐工作流 | hermit-workflow | 开发→调试→更新 README→总结会话 |
 | 十三 | Supabase 数据库 | hermit-supabase | 安装方法、连接池地址、客户端示例 |
-| 十五 | Tools 知识库接口 | hermit-tools-hub | 向 18081 Hub 注册/查询工具文档 |
+| 十五 | Tools 知识库接口 | hermit-tools-hub | 18081 Hub 对接文档首页、容器卡片可选注册 |
 
 首次启动时应至少查阅 hermit-paths、hermit-ports、hermit-workflow。

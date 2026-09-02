@@ -92,16 +92,15 @@ def main():
     # --- 关键端口落点抽查 ---
     sysreadme = shift_ports(contents[RULES_FILES[0]], offset)
     assert "19081" in sysreadme, "systemreadme 应出现 19081（原 18081）"
-    assert "19000-19999" in sysreadme, "systemreadme 应出现 19000-19999（原 18000-19999）"
+    assert "19081-19999" in sysreadme, "systemreadme 应出现 19081-19999（原 18081-19999）"
 
     ports_md = shift_ports(contents[RULES_FILES[1]], offset)
     assert "19080" in ports_md, "hermit-ports 应出现 19080（原 18080）"
-    assert "19000-19079" in ports_md, "hermit-ports 应出现 19000-19079（原 18000-18079）"
     assert "19081-19999" in ports_md, "hermit-ports 应出现 19081-19999（原 18081-19999）"
 
     hub_md = shift_ports(contents[RULES_FILES[2]], offset)
     assert "19081" in hub_md, "hermit-tools-hub 应出现 19081（原 18081）"
-    assert "19000" in hub_md, "hermit-tools-hub 应出现 19000（原 18000）"
+    assert "19200" in hub_md, "hermit-tools-hub 应出现 19200（原 18200）"
 
     init_md = shift_ports(contents[RULES_FILES[3]], offset)
     assert "19081" in init_md, "hermit-init 应出现 19081（原 18081）"

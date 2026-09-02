@@ -1,8 +1,8 @@
 INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
 # TOOL_INITIAL_MESSAGE: 工具类容器专属初始提示词（FORK为工具功能部署完成后发送）
-# 与普通容器不同：部署完成后必须到 18081 注册 doc（通过 /api/tools 接口，规范见 systemreadme.md 第15章）
+# 工具类与普通容器端口不再区分；容器是否注册到 Hub 由用户在 Control 面板卡片上勾选决定（注册=写入调用指南到 Hub docs）。
 # 使用位置：create_agent() 初始消息发送逻辑（tool=True 时替代 INITIAL_MESSAGE）
-TOOL_INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到{tools_hub_port}注册doc：调用 POST http://host.docker.internal:{tools_hub_port}/api/tools 接口，请求体为JSON格式，包含port字段(填你的宿主机端口)、name字段(工具唯一名称)、display_name(显示名称)、description(简短描述)、doc_md字段(完整Markdown文档，需包含功能概览表格、所有API端点及说明、使用示例)。注册后可调用 GET http://host.docker.internal:{tools_hub_port}/api/tools 验证。详细规范见systemreadme.md第十五章（{tools_hub_port} Hub Tools 知识库接口）。"
+TOOL_INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。你是一个工具类容器，与普通容器端口不再区分；是否注册到{tools_hub_port} Hub（对接文档首页）由用户在 Control 面板卡片上勾选决定，注册即把你的调用指南写入 Hub docs。"
 # Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
 
@@ -17,6 +17,7 @@ def _d(tag, msg):
         pass
 
 import json
+import html
 import os
 import re
 import sys
@@ -35,6 +36,8 @@ import docker
 from docker.types import LogConfig
 from flask import Flask, jsonify, make_response, request, send_file
 from flask_sock import Sock
+
+import tools_hub
 
 # GLOBAL PARAMETERS
 # ---- 端口配置：start_port 从宿主机挂载的 config/hermit_settings.json 读取（默认 18080）----
@@ -55,13 +58,11 @@ _PORT_CFG = _load_port_config()
 CONTROL_PORT = int(_PORT_CFG.get("start_port", 18080) or 18080)
 # PORT_OFFSET: 相对默认 18080 的端口偏移量，所有 18xxx 宿主机端口统一加此偏移
 PORT_OFFSET = CONTROL_PORT - 18080
-# TOOL_START_PORT / TOOL_END_PORT: 工具类容器宿主机端口段（默认 18000-18079）
-TOOL_START_PORT = 18000 + PORT_OFFSET  # 使用位置：find_tool_port() 端口分配、is_tool() 工具容器判断
-TOOL_END_PORT = 18079 + PORT_OFFSET    # 使用位置：find_tool_port() 端口分配上限、is_tool() 工具容器判断
-# START_HOST_PORT / END_HOST_PORT: agent 容器宿主机端口段（默认 18081-18999）
+# START_HOST_PORT / END_HOST_PORT: 所有容器（工具类与普通容器统一）宿主机端口段（默认 18081-18999）
 START_HOST_PORT = 18081 + PORT_OFFSET  # 使用位置：find_next_port() 端口分配
 END_HOST_PORT = 18999 + PORT_OFFSET    # 使用位置：find_next_port() 端口分配上限
-# TOOLS_HUB_PORT: 工具 Hub 注册端口（默认 18081），用于 TOOL_INITIAL_MESSAGE 占位符替换
+# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（默认 18081），提供对接文档首页 + /api/tools 接口
+# 使用位置：TOOL_INITIAL_MESSAGE 占位符替换、create_tools_hub_app() 首页展示、docker-compose 18081:8081 映射
 TOOLS_HUB_PORT = 18081 + PORT_OFFSET
 # SERVICE_PORT: 容器内固定服务端口（不随宿主端口偏移）
 SERVICE_PORT = 8082
@@ -195,22 +196,9 @@ def create_app(docker_client=None):
     def managed_containers():
         return sorted([c for c in all_containers() if is_managed(c)], key=lambda c: c.name)
 
-    def is_tool(container):
-        """18000-18079 工具类容器，不在 control 面板展示"""
-        name = getattr(container, "name", "") or ""
-        if name.startswith("hermit-tool-"):
-            return True
-        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
-        if labels.get("hermit.tool") == "true":
-            return True
-        port = container_host_port(container)
-        return port is not None and TOOL_START_PORT <= port <= TOOL_END_PORT
-
     def display_containers():
         items = []
         for c in all_containers():
-            if is_tool(c):
-                continue
             if is_managed(c):
                 items.append(c)
                 continue
@@ -317,15 +305,6 @@ def create_app(docker_client=None):
                 return port
         raise RuntimeError("No available host port in configured range")
 
-    def find_tool_port():
-        # 工具类端口分配：遍历 TOOL_START_PORT..TOOL_END_PORT（18000-18079）
-        # 遍历全部容器（含 hermit-tool-* 非 managed 容器），避免与既有工具端口冲突
-        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
-        for port in range(TOOL_START_PORT, TOOL_END_PORT + 1):
-            if port not in used:
-                return port
-        raise RuntimeError("No available tool host port in configured range")
-
     def project_path_for_agent_type(agent_type):
         if agent_type in ("claude", "ollama"):
             return "/home/agent/.claude/workspace/project"
@@ -399,7 +378,7 @@ def create_app(docker_client=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
-        host_port = find_tool_port() if tool else find_next_port()
+        host_port = find_next_port()
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
         _d("create", f"container={container_name} host_port={host_port}")
@@ -724,7 +703,7 @@ def create_app(docker_client=None):
         if agent_type not in AGENT_SPECS:
             raise ValueError(f"Unsupported agent type: {agent_type}")
 
-        new_host_port = find_tool_port()
+        new_host_port = find_next_port()
         if fork_name and fork_name.strip():
             base_name = _safe_name_part(fork_name.strip())
         else:
@@ -797,6 +776,7 @@ def create_app(docker_client=None):
             "ssh_port": port - 10000 if port else None,
             "service_port": SERVICE_PORT,
             "managed": is_managed(container),
+            "registered": tools_hub.get_tool_file(tools_hub.derive_tool_name(container.name)) is not None,
             "logs": _tail_logs(container, tail=200),
             "state": agent_states.get(container.name, "idle"),
         }
@@ -1703,6 +1683,31 @@ def create_app(docker_client=None):
                 errors[c.name] = str(e)
         return jsonify({"ok": True, "recreated": recreated, "errors": errors, "recreated_at": now_iso()})
 
+    @app.post("/api/agents/<path:name>/register")
+    def api_register_agent(name):
+        """把该容器的调用指南（doc_md）写入 19081 Hub 的 docs（注册）。"""
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type", "")
+        port = container_host_port(container)
+        body = request.get_json(silent=True) or {}
+        description = (body.get("description") or "").strip()
+        record = tools_hub.build_tool_record(name, port, agent_type, description=description)
+        tools_hub.register_tool_file(record)
+        return jsonify({"ok": True, "registered": record})
+
+    @app.delete("/api/agents/<path:name>/register")
+    def api_unregister_agent(name):
+        """取消注册：把该容器的调用指南从 19081 Hub docs 中移除。"""
+        tool_name = tools_hub.derive_tool_name(name)
+        removed = tools_hub.unregister_tool_file(tool_name)
+        return jsonify({"ok": True, "removed": bool(removed)})
+
     @app.get("/")
     def index():
         poll_ms = 5000
@@ -2087,6 +2092,9 @@ def create_app(docker_client=None):
             <button data-action="recreate">重建</button>
             <button data-action="cleanup-context">清理上下文</button>
             <button data-action="init">发送初始消息</button>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:rgba(255,255,255,0.85);">
+              <input type="checkbox" class="register-toggle" data-action="register" ${{item.registered ? 'checked' : ''}} /> 注册
+            </label>
           </div>
           <div class="cmd-bar">
             <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
@@ -2272,6 +2280,22 @@ def create_app(docker_client=None):
           const d = await r.json();
           logBox.textContent += `\n(上下文已清理) ${{d.output || ""}}\n`;
         }};
+        
+        const registerToggle = div.querySelector('.register-toggle');
+        if (registerToggle) {{
+          registerToggle.onchange = async (e) => {{
+            const register = e.target.checked;
+            const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/register`;
+            const r = await fetch(url, {{ method: register ? "POST" : "DELETE" }});
+            if (!r.ok) {{
+              registerToggle.checked = !register;
+              const d = await r.json();
+              logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+              return;
+            }}
+            logBox.textContent += register ? `\n[已注册] 调用指南已写入 19081 Hub docs\n` : `\n[已取消注册]\n`;
+          }};
+        }}
         
         const cardTitle = div.querySelector('.card-title');
         const gitSelect = div.querySelector('.git-select');
@@ -2581,8 +2605,93 @@ def create_app(docker_client=None):
     return app
 
 
+def create_tools_hub_app():
+    """19081 工具 Hub（对接文档）：首页展示已注册工具的调用指南，并提供 /api/tools 接口。"""
+    hub = Flask("hermit_tools_hub")
+    hub.config["JSON_AS_ASCII"] = False
+
+    @hub.get("/api/tools")
+    def hub_list():
+        return jsonify({"items": tools_hub.list_tools_file()})
+
+    @hub.post("/api/tools")
+    def hub_register():
+        body = request.get_json(silent=True) or {}
+        try:
+            record = tools_hub.register_tool_file(body)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(record), 200
+
+    @hub.get("/api/tools/<name>")
+    def hub_get(name):
+        record = tools_hub.get_tool_file(name)
+        if record is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(record)
+
+    @hub.delete("/api/tools/<name>")
+    def hub_delete(name):
+        removed = tools_hub.unregister_tool_file(name)
+        return jsonify({"ok": True, "removed": bool(removed)})
+
+    @hub.get("/")
+    def hub_index():
+        items = tools_hub.list_tools_file()
+        if not items:
+            body = "<p>暂无已注册的工具。可在 Control 面板容器卡片上勾选「注册」写入调用指南。</p>"
+        else:
+            rows = []
+            for t in items:
+                name = html.escape(str(t.get("name") or ""))
+                display = html.escape(str(t.get("display_name") or name))
+                desc = html.escape(str(t.get("description") or ""))
+                port = t.get("port")
+                doc = html.escape(str(t.get("doc_md") or ""))
+                rows.append(
+                    f"<section class='tool'>"
+                    f"<h2>{display}</h2>"
+                    f"<div class='meta'>名称：{name} · 端口：{port} · {desc}</div>"
+                    f"<pre>{doc}</pre>"
+                    f"</section>"
+                )
+            body = "\n".join(rows)
+        page = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hermit Tools Hub {TOOLS_HUB_PORT}</title>
+<style>
+body {{ margin:0; background:#070A10; color:rgba(255,255,255,0.92); font-family:ui-monospace,Menlo,Consolas,monospace; }}
+.wrap {{ max-width:1000px; margin:0 auto; padding:24px 18px; }}
+h1 {{ font-size:18px; }}
+.tool {{ margin-top:16px; border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:14px; background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03)); }}
+.tool h2 {{ margin:0 0 6px; font-size:15px; }}
+.tool .meta {{ color:rgba(255,255,255,0.6); font-size:12px; margin-bottom:10px; }}
+pre {{ margin:0; padding:12px; background:rgba(0,0,0,0.3); border-radius:8px; overflow:auto; font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-word; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Hermit Tools Hub · 对接文档</h1>
+{body}
+</div>
+</body>
+</html>"""
+        return page, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+    return hub
+
+
 app = create_app()
+tools_hub_app = create_tools_hub_app()
 
 
 if __name__ == "__main__":
+    import threading
+    from werkzeug.serving import make_server
+    hub_server = make_server("0.0.0.0", 8081, tools_hub_app, threaded=True)
+    threading.Thread(target=hub_server.serve_forever, daemon=True).start()
+    print("[tools-hub] listening on 8081", flush=True)
     app.run(host="0.0.0.0", port=8080)

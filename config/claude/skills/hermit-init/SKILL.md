@@ -11,5 +11,6 @@
    logs/agent_tui.log 里的主要内容，梳理出项目构建的结构和细节，
    总结最后3轮对话的内容。"
 
-工具类容器的初始化消息不同，包含向 18081 Hub 注册 doc 的步骤。
-详见 hermit-tools-hub skill。
+工具类容器与普通容器的端口不再区分，统一由 Control 面板分配。
+容器是否注册到 18081 Hub 由用户在面板卡片上勾选决定（注册即把调用指南写入 Hub docs），
+容器启动时不再强制注册。详见 hermit-tools-hub skill。
