@@ -2,8 +2,9 @@
 # docker-compose.sh
 # Hermit 部署脚本（适配 Linux / macOS）：
 #   1) 从 config/hermit_settings.json 读取起始端口 start_port
-#   2) 恢复 docker-compose.yml 为默认占位状态（18080）
-#   3) 将 docker-compose.yml 中的 18080 动态替换为 start_port
+#   2) 恢复 docker-compose.yml 为默认占位状态（基准 18080）
+#   3) 按 PORT_OFFSET = start_port - 18080 重写所有 18xxx 宿主机端口。
+#      容器内部端口（8080 / 8088 / 5030 / 18790 / 22）保持不变。
 #   4) 构建 agent 模板镜像（带 profiles: ["templates"]，默认 up 不构建，需显式构建）
 #   5) 执行 docker compose 部署 control 服务
 # 说明：端口来自配置文件，不硬编码，修改 hermit_settings.json 后重新运行即可生效。
@@ -28,16 +29,33 @@ if [ -z "$PORT" ]; then
 fi
 echo "目标起始端口: $PORT"
 
-# 2. 恢复 docker-compose.yml 为默认占位（18080），保证脚本可重复执行
+# 2. 恢复 docker-compose.yml 为默认占位（基准 18080），保证脚本可重复执行
 if ! git -C "$SCRIPT_DIR" checkout -- docker-compose.yml 2>/dev/null; then
     echo "警告: git checkout 恢复 docker-compose.yml 失败，使用当前文件继续"
 fi
 
-# 3. 将 18080 动态替换为目标端口（service 名 / container_name / ports 映射）
-#    sed -i.bak 写法在 Linux 和 macOS 上均可用，替换完成后删除备份文件
-sed -i.bak "s/18080/$PORT/g" "$COMPOSE_PATH"
+# 3. 按偏移量重写所有宿主机 18xxx 端口
+BASE=18080
+OFFSET=$((PORT - BASE))
+CONTROL=$((18080 + OFFSET))     # 控制面：service 名 / container 名 / 宿主端口
+OBS=$((18000 + OFFSET))         # obs 工具：service 名 / container 名 / 宿主端口 / HOST_PORT
+EMAIL=$((18001 + OFFSET))       # email 工具：service 名 / container 名 / 宿主端口 / HOST_PORT
+HUB=$((18081 + OFFSET))         # 工具 Hub：TOOLS_HUB_URL
+SSH=$((18800 + OFFSET))         # ssh 网关宿主端口
+GATEWAY_HOST=$((18790 + OFFSET)) # openclaw 网关：只改宿主侧，容器侧 18790 保持不变
+
+# sed -i.bak 在 Linux 与 macOS 上均可用，替换完成后删除备份文件。
+# 第一条只改 openclaw-gateway 的宿主侧，避免误改 OPENCLAW_GATEWAY_PORT=18790（容器内部端口）。
+sed -i.bak \
+    -e "s/\"18790:18790\"/\"$GATEWAY_HOST:18790\"/g" \
+    -e "s/18080/$CONTROL/g" \
+    -e "s/18000/$OBS/g" \
+    -e "s/18001/$EMAIL/g" \
+    -e "s/18081/$HUB/g" \
+    -e "s/18800/$SSH/g" \
+    "$COMPOSE_PATH"
 rm -f "$COMPOSE_PATH.bak"
-echo "已将 docker-compose.yml 中的 18080 替换为 $PORT"
+echo "已重写 docker-compose.yml 宿主机端口 (offset=$OFFSET)"
 
 # 4. 构建 agent 模板镜像（带 profiles: ["templates"]，默认 up 不构建，需显式构建）
 echo "构建 agent 模板镜像..."
