@@ -57,6 +57,24 @@ sed -i.bak \
 rm -f "$COMPOSE_PATH.bak"
 echo "已重写 docker-compose.yml 宿主机端口 (offset=$OFFSET)"
 
+# 3b. 给 agent 看的规范材料（systemreadme / hermit-ports / hermit-tools-hub）端口替换
+#     这些为 git 跟踪模板，先恢复基准保证可重复执行；再用 perl 将独立 18xxx 端口加偏移。
+RULES_FILES=(
+  "config/rules/systemreadme.md"
+  "config/claude/skills/hermit-ports/SKILL.md"
+  "config/claude/skills/hermit-tools-hub/SKILL.md"
+  "config/claude/skills/hermit-init/SKILL.md"
+)
+if ! git -C "$SCRIPT_DIR" checkout -- "${RULES_FILES[@]}" 2>/dev/null; then
+  echo "警告: git checkout 恢复规范材料失败，使用当前文件继续" >&2
+fi
+export OFFSET
+for _f in "${RULES_FILES[@]}"; do
+  [ -f "$SCRIPT_DIR/$_f" ] || continue
+  perl -i -pe 's/(?<!\d)18(\d{3})(?!\d)/sprintf("%d", 18000 + $1 + $ENV{OFFSET})/ge' "$SCRIPT_DIR/$_f"
+done
+echo "已重写给 agent 的规范材料端口 (offset=$OFFSET)"
+
 # 4. 构建 agent 模板镜像（带 profiles: ["templates"]，默认 up 不构建，需显式构建）
 echo "构建 agent 模板镜像..."
 docker compose build agent-image-claude agent-image-openclaw agent-image-ollama

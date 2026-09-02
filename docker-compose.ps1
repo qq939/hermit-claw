@@ -59,6 +59,29 @@ foreach ($key in $map.Keys) {
 [System.IO.File]::WriteAllText($composePath, $content, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Rewrote docker-compose.yml host ports (offset=$offset)"
 
+# 3b. Rewrite agent-facing docs (systemreadme / hermit-ports / hermit-tools-hub).
+#     These are git-tracked templates the containers read; restore them first so
+#     the run stays repeatable, then shift every standalone 18xxx port by offset.
+$rulesFiles = @(
+    "config/rules/systemreadme.md",
+    "config/claude/skills/hermit-ports/SKILL.md",
+    "config/claude/skills/hermit-tools-hub/SKILL.md",
+    "config/claude/skills/hermit-init/SKILL.md"
+)
+git -C $root checkout -- $rulesFiles 2>$null
+$portEvaluator = [System.Text.RegularExpressions.MatchEvaluator] {
+    param($m)
+    [string]([int]$m.Value + $offset)
+}
+foreach ($f in $rulesFiles) {
+    $full = Join-Path $root $f
+    if (-not (Test-Path $full)) { continue }
+    $t = [System.IO.File]::ReadAllText($full)
+    $t = [regex]::Replace($t, '(?<!\d)18\d{3}(?!\d)', $portEvaluator)
+    [System.IO.File]::WriteAllText($full, $t, (New-Object System.Text.UTF8Encoding($false)))
+}
+Write-Host "Rewrote agent-facing docs host ports (offset=$offset)"
+
 # 4. Build agent template images (profiles: ["templates"] are not built by `up`)
 Write-Host "Building agent template images..."
 docker compose build agent-image-claude agent-image-openclaw agent-image-ollama
