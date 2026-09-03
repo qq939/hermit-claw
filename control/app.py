@@ -66,6 +66,9 @@ AGENT_RUNTIME_USER = "agent"
 HOST_CONFIG_ROOT_ENV = "HOST_CONFIG_ROOT"
 # Used in create_app (line 46-50) and create_agent (line 118-130) to translate in-container paths to actual host bind mount paths when creating new containers via Docker socket.
 HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
+# HOST_TOOLS_ROOT_ENV: 宿主机 tools 目录环境变量名，用于把 tools 源码挂载到每个容器卡片工作目录下。
+# 使用位置：create_app（解析 app.config["HOST_TOOLS_ROOT"]，约 L154）；create_agent / recreate_agent（读取 host_tools_root 并挂载 volume）。
+HOST_TOOLS_ROOT_ENV = "HOST_TOOLS_ROOT"
 # agent_states: 容器卡片状态字典，key=container_name, value="idle"|"thinking"|"done"
 # "idle": 空闲（绿色） / "thinking": 思考中（黄色） / "done": 回答完毕（红色+闪烁）
 # 由 send-message(L942) 设 thinking，SessionEnd 钩子(L1008) 设 done，reset-state(L1008) 恢复 idle
@@ -151,6 +154,8 @@ def create_app(docker_client=None):
             pass
         app.config["HOST_WORKSPACES_ROOT"] = host_ws
     app.config["HOST_LOGS_ROOT"] = os.path.join(os.path.dirname(host_ws), "logs")
+    # 宿主机 tools 目录（项目根下 tools/），默认由 HOST_WORKSPACES_ROOT 推导（<项目根>/tools），可被 HOST_TOOLS_ROOT 覆盖。
+    app.config["HOST_TOOLS_ROOT"] = os.environ.get(HOST_TOOLS_ROOT_ENV) or os.path.join(os.path.dirname(host_ws), "tools")
 
     def docker_client_or_default():
         configured = app.config.get("DOCKER_CLIENT")
@@ -379,6 +384,7 @@ def create_app(docker_client=None):
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
+        host_tools_root = app.config["HOST_TOOLS_ROOT"]
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}/sessions", exist_ok=True)
@@ -395,6 +401,7 @@ def create_app(docker_client=None):
             f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
             f"{host_config_root}/rules": {"bind": "/home/agent/.claude/workspace/config-rules", "mode": "ro"},
+            f"{host_tools_root}": {"bind": project_path_for_agent_type(agent_type) + "/tools", "mode": "ro"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
@@ -527,6 +534,7 @@ def create_app(docker_client=None):
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
+        host_tools_root = app.config["HOST_TOOLS_ROOT"]
         os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
@@ -541,6 +549,7 @@ def create_app(docker_client=None):
             f"{host_workspaces_root}/{container_name}/sessions": {"bind": "/home/agent/.claude/projects", "mode": "rw"},
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
             f"{host_config_root}/rules": {"bind": "/home/agent/.claude/workspace/config-rules", "mode": "ro"},
+            f"{host_tools_root}": {"bind": project_path_for_agent_type(agent_type) + "/tools", "mode": "ro"},
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)
