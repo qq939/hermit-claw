@@ -104,27 +104,32 @@ curl "http://localhost:8082/ask/claude?q=$(echo '你好，请介绍一下自己'
 - 失败：错误信息（500）
 
 ================================================================================
-核心三、注册到 Hub — Tools 知识库（对接文档）
+核心三、注册到 Hub — Tools 知识库（19081）
 ================================================================================
 
-Hub（19081）是平台统一的对接口径。任何容器都可以把「自己是谁、怎么调用」注册到 Hub，
-注册后调用指南会写入 Hub docs 并展示在 19081 首页，供其他 Agent 查阅。
+Hub（19081）是平台统一的工具知识库与对接入口。tools 下的每个项目（如 obs 图床、
+email 邮件等）都可把「自己是谁、提供哪些接口、怎么调用」注册到 Hub，展示在首页。
 
-### 注册接口（公共接口规范）
+### 首页
 
+http://dimond.top:19081 首页为「工具知识库」：底部 pills 切换工具、iframe 预览
+工具 Web UI、Docs 查看器查看工具文档，并内置 Hub 公共接口文档与示例工具（obs）范本。
+
+### 注册（公共接口规范）
+
+推荐传「完整记录」（`name` 必填，`doc_md` 写清所有功能性接口）：
+
+```json
+{
+  "name": "obs",
+  "display_name": "OBS 图床",
+  "description": "文件托管、断点续传、公告板服务",
+  "port": 19082,
+  "doc_md": "# OBS 图床 ...（功能接口 Markdown）"
+}
 ```
-POST http://host.docker.internal:19081/api/tools
-Content-Type: application/json
-```
 
-请求体使用以下公共字段（`container_name` 必填，其余可选）：
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| container_name | 是 | 容器名，Hub 会据此派生唯一 `name`（如 `19082-writer` → `writer`）|
-| host_port | 否 | 宿主机访问端口 |
-| agent_type | 否 | 容器类型：claude / ollama / openclaw |
-| description | 否 | 一句话描述，写入调用指南 |
+也可传「简化记录」（`container_name` 必填），Hub 自动派生 name / port / doc_md：
 
 ```json
 {
@@ -135,19 +140,17 @@ Content-Type: application/json
 }
 ```
 
-### 其他方式
-
-- 在 Control 面板的容器卡片上勾选「注册」复选框，面板会自动调用
-  `POST /api/agents/<容器名>/register` 完成注册；取消勾选则注销。
-- 同名容器重复注册会覆盖旧记录。
-
-### 查询接口
+### 查询 / 注销
 
 ```
-GET     http://host.docker.internal:19081/api/tools          # 查询全部
-GET     http://host.docker.internal:19081/api/tools/<name>   # 查询单个
-DELETE  http://host.docker.internal:19081/api/tools/<name>   # 删除单个
+GET     http://host.docker.internal:19081/api/tools           # 全部
+GET     http://host.docker.internal:19081/api/tools/<name>    # 单个
+DELETE  http://host.docker.internal:19081/api/tools/<name>    # 注销
 ```
+
+### 调用约定
+
+容器卡片之间的调用统一走宿主机端口：`http://dimond.top:19xxx`（xxx 为该工具分配的端口）。
 
 更多细节（响应字段、持久化位置）见 skill：hermit-tools-hub。
 

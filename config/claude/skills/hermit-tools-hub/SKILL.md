@@ -1,65 +1,54 @@
-# 十五、19081 Hub Tools 知识库（对接文档首页）
+# 十五、19081 Hub — Tools 知识库（对接文档 + 公共接口）
 
-19081 Hub 是 Hermit 的工具知识库与对接文档中心。所有容器（工具类与普通容器端口统一，不再区分工具段）都可以选择是否注册到 Hub。注册后，该容器的调用指南（Markdown）会写入 Hub docs，并直接展示在 19081 首页上。
+19081 Hub 是 Hermit 的工具知识库与对接文档中心。tools 下的每个项目（obs、email、
+github 等）都可以注册到 Hub，把「自己是谁、提供哪些接口、怎么调用」展示在首页。
 
-## 15.1 注册方式（可选）
+## 15.1 首页（工具知识库）
 
-容器启动时不再强制注册。用户可在 Control 面板的容器卡片上勾选「注册」复选框：
+访问 http://dimond.top:19081：
 
-- 勾选注册：面板调用 `POST /api/agents/<容器名>/register`，把该容器的调用指南写入 Hub docs。
-- 取消注册：面板调用 `DELETE /api/agents/<容器名>/register`，从 Hub docs 中移除。
-- 同名容器重复注册会覆盖旧文档，以最新注册为准。
+- 底部 pills 导航：切换已注册工具。
+- iframe：预览工具的 Web UI。
+- Docs 查看器：查看该工具的 `doc_md` 文档。
+- 首页内置两份文档：Hub 公共接口文档 + 示例工具（obs 图床）注册范本。
 
-注册的本质：把该容器的调用指南（容器名、类型、宿主机端口、访问地址、简介、调用方式）写入 Hub 的 docs，并持久化到 config/tools_registry.json。
+## 15.2 公共接口
 
-## 15.2 Hub 首页（对接文档）
+- `GET /api/tools` — 列出所有已注册工具
+- `POST /api/tools` — 注册一个工具（完整记录或简化记录）
+- `GET /api/tools/{name}` — 查询单个工具详情
+- `DELETE /api/tools/{name}` — 注销工具
+- `GET /p/{name}/...` — 同源代理到该工具的 Web UI
+- `GET /` — 首页
 
-直接访问 http://dimond.top:19081 即可查看所有已注册容器的对接文档：
+### 完整记录（推荐，tools 下项目直接注册）
 
-- 展示每个已注册容器的 display_name / name / 宿主机端口 / 描述 / 调用指南（doc_md）。
-- 暂无已注册容器时显示空提示。
-
-## 15.3 查询接口（供 Agent 或开发者调用）
-
-**查询全部：**
-
-```
-GET http://host.docker.internal:19081/api/tools
-```
-
-响应格式：
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| name | 是 | 工具唯一名 |
+| display_name | 否 | 展示名 |
+| description | 否 | 一句话描述 |
+| doc_md | 否 | 完整功能接口文档（Markdown）|
+| port | 否 | 宿主机端口（也可用 `host_port`）|
 
 ```json
 {
-  "items": [
-    {
-      "name": "writer",
-      "port": 19200,
-      "display_name": "19200-writer",
-      "description": "一句话描述",
-      "doc_md": "...",
-      "container_name": "19200-writer",
-      "agent_type": "claude"
-    }
-  ]
+  "name": "obs",
+  "display_name": "OBS 图床",
+  "description": "文件托管、断点续传、公告板服务",
+  "port": 19082,
+  "doc_md": "# OBS 图床 ..."
 }
 ```
 
-**注册单个（公共接口规范，供需要直接注册的 Agent 调用）：**
-
-```
-POST http://host.docker.internal:19081/api/tools
-Content-Type: application/json
-```
-
-请求体使用公共字段（`container_name` 必填，其余可选）：
+### 简化记录（control 面板派生）
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | container_name | 是 | 容器名，Hub 据此派生唯一 `name` |
-| host_port | 否 | 宿主机访问端口 |
-| agent_type | 否 | 容器类型：claude / ollama / openclaw |
-| description | 否 | 一句话描述，写入 doc_md |
+| host_port | 否 | 宿主机端口 |
+| agent_type | 否 | claude / ollama / openclaw |
+| description | 否 | 一句话描述 |
 
 ```json
 {
@@ -70,20 +59,20 @@ Content-Type: application/json
 }
 ```
 
-Hub 内部会把上述公共字段归一化为完整记录（`name` 由 container_name 派生，
-`port` 取自 host_port，`doc_md` 自动生成）。也可直接传完整记录（`name`/`port`/
-`display_name`/`description`/`doc_md`），Hub 原样接收。
+## 15.3 调用约定
 
-**查询单个 / 删除单个：**
+容器卡片之间的调用统一走宿主机端口：`http://dimond.top:19xxx`（xxx 为该工具分配的
+宿主机端口，19081-19999 区间）。不要使用旧域名或 18xxx 端口。
 
-```
-GET    http://host.docker.internal:19081/api/tools/<name>
-DELETE http://host.docker.internal:19081/api/tools/<name>
-```
+## 15.4 示例工具（obs 图床）
 
-## 15.4 注意事项
+首页内置示例工具 `obs`，作为注册范本，其 `doc_md` 覆盖完整功能接口：
 
-1. 注册是可选的，由用户在 Control 面板卡片上勾选决定。
-2. 注册表持久化到 config/tools_registry.json（容器内挂载到 /config），重启后仍保留。
-3. doc_md 应尽可能详细说明容器能力、API 端点和用法。
-4. 对接文档可在 19081 Hub 首页可视化查看（http://dimond.top:19081）。
+- 文件上传 / 下载 / 删除，Range 分片下载
+- 断点续传（`/upload/init`、`/upload/chunk/{id}/{i}`、`/upload/complete/{id}`）
+- 公告板 WebSocket（`/ws`、`/notice`、`/save_notice`）
+
+## 15.5 持久化
+
+注册表持久化到 `config/tools_registry.json`（容器内挂载到 `/config`），重启后保留。
+同名工具重复注册会覆盖旧记录。
