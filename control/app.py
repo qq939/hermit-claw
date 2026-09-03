@@ -1,6 +1,9 @@
 INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
-# Used in docker compose volume mount (docker-compose.yml) to bind frpc binary into containers.
+# FRPC_PATH / FRPC_ALT_PATH: frpc 配置目录（容器内路径，由 docker-compose.yml 把宿主机 ../frpc 与 ../frp 挂载进来）。
+# 兼容 frp 与 frpc 两种目录：宿主机 frpc.ini 可能位于 frp 或 frpc 目录，优先使用实际存在的那个。
+# 使用位置：resolve_frpc_config_path()（探测 frpc.ini 实际位置，约 L202）；add_frpc_rule()（写入端口映射规则）。
 FRPC_PATH = "/Users/jimjiang/Downloads/frpc"
+FRPC_ALT_PATH = "/Users/jimjiang/Downloads/frp"
 
 def _d(tag, msg):
     """Debug 日志：写入 /logs/hermit/debug.log"""
@@ -199,7 +202,14 @@ def create_app(docker_client=None):
                         return int(binding["HostPort"])
         return None
 
-    FRPC_CONFIG_PATH = os.path.join(FRPC_PATH, "frpc.ini")
+    def resolve_frpc_config_path():
+        # 兼容 frp / frpc 两种目录：优先返回实际存在 frpc.ini 的目录。
+        for d in (FRPC_PATH, FRPC_ALT_PATH):
+            p = os.path.join(d, "frpc.ini")
+            if os.path.isfile(p):
+                return p
+        # 兜底：两者都不存在时写入主目录（FRPC_PATH），后续由挂载决定是否生效。
+        return os.path.join(FRPC_PATH, "frpc.ini")
 
     def add_frpc_rule(port):
         section = f"mac{port}"
@@ -210,13 +220,14 @@ def create_app(docker_client=None):
             f"local_port = {port}\n"
             f"remote_port = {port}\n"
         )
+        cfg_path = resolve_frpc_config_path()
         try:
-            with open(FRPC_CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(cfg_path, "r", encoding="utf-8") as f:
                 content = f.read()
             if f"[{section}]" in content:
                 print(f"[frpc] port {port} already configured, skipping", flush=True, file=sys.stderr)
                 return
-            with open(FRPC_CONFIG_PATH, "a", encoding="utf-8") as f:
+            with open(cfg_path, "a", encoding="utf-8") as f:
                 f.write(entry)
             print(f"[frpc] added rule for port {port}, restarting frpc via docker-py...", flush=True, file=sys.stderr)
             try:
