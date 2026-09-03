@@ -24,6 +24,59 @@ _REGISTRY_LOCK = threading.Lock()
 # 使用位置：derive_tool_name
 _NAME_SANITIZE_PATTERN = re.compile(r"[^a-z0-9_-]+")
 
+# EXAMPLE_TOOL: 首页展示的「示例工具」注册范本（抽自 tools/obs 项目）。
+# 展示一个合格工具注册记录应包含的完整功能接口文档；对外调用地址统一 http://dimond.top:19xxx。
+# 使用位置：tools/hub/app.py 首页渲染示例工具文档。
+EXAMPLE_TOOL = {
+    "name": "obs",
+    "display_name": "OBS 图床",
+    "description": "文件托管、存储桶、断点续传、公告板(WebSocket)服务",
+    "doc_md": """# OBS 图床 / 存储桶服务（示例注册范本）
+
+> 这是 tools 下项目的标准注册格式。已注册工具的对外调用地址统一为 `http://dimond.top:19xxx`（xxx 为该容器卡片分配的宿主机端口）。
+
+## 功能概览
+
+| 功能 | 说明 |
+|------|------|
+| 文件上传 | Web UI 拖拽/粘贴上传、表单上传、PUT 流式上传 |
+| 断点续传 | SHA256 秒传 + 分片上传 + 自动合并 |
+| 文件下载 | 支持 Range 分片下载、流式下载 |
+| 公告板 | WebSocket 实时同步、多人协作编辑、保存为文件 |
+
+## API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | Web UI 文件管理器 |
+| PUT | `/{filename}` | 流式上传文件 |
+| DELETE | `/{filename}` | 删除文件 |
+| GET | `/{filename}` | 下载文件（支持 Range） |
+| POST | `/upload/init` | 初始化断点续传会话 |
+| PUT | `/upload/chunk/{upload_id}/{index}` | 上传分片 |
+| POST | `/upload/complete/{upload_id}` | 合并分片完成上传 |
+| WS | `/ws` | 公告板 WebSocket |
+| GET | `/notice` | 获取公告板内容 |
+| POST | `/notice` | 更新公告板内容 |
+| POST | `/save_notice` | 保存公告板为文件 |
+
+## 使用示例
+
+```bash
+# 上传文件
+curl --upload-file file.txt http://dimond.top:19xxx/file.txt
+
+# 下载文件
+curl http://dimond.top:19xxx/file.txt -o file.txt
+
+# 初始化断点续传
+curl -X POST http://dimond.top:19xxx/upload/init \\
+  -H "Content-Type: application/json" \\
+  -d '{"filename":"a.bin","size":1048576,"hash":"...","chunk_size":1048576,"total_chunks":1}'
+```
+""",
+}
+
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -84,19 +137,41 @@ def build_tool_record(container_name, host_port, agent_type, description=""):
 def normalize_tool_payload(body):
     """把 POST /api/tools 的请求体归一化为工具注册记录（公共接口规范）。
 
-    公共接口（推荐，供 Agent / 容器卡片调用）：
+    公共接口支持两种格式：
+
+    1) 完整记录（推荐，供 tools 下项目 / 容器卡片直接注册）：
+        {
+          "name": "obs",                      # 必填：工具唯一名
+          "display_name": "OBS 图床",          # 可选：展示名
+          "description": "一句话描述",          # 可选：简介
+          "doc_md": "# OBS ...",              # 可选：完整功能接口文档（Markdown）
+          "port": 19082                       # 可选：宿主机端口（也可用 host_port）
+        }
+
+    2) 简化记录（供 control 面板根据容器信息派生）：
         {
           "container_name": "19082-writer",   # 必填：容器名，派生唯一 name
           "host_port": 19082,                 # 可选：宿主机端口
           "agent_type": "claude",             # 可选：容器类型 claude/ollama/openclaw
-          "description": "一句话描述"          # 可选：简介，写入 doc_md
+          "description": "一句话描述"          # 可选：简介
         }
-
-    兼容旧格式（直接传完整记录，原样直通）：
-        { "name": "...", "port": 0, "display_name": "...", "description": "...", "doc_md": "..." }
     """
     body = body or {}
-    if isinstance(body, dict) and ("container_name" in body or "host_port" in body or "agent_type" in body):
+    if not isinstance(body, dict):
+        return body
+
+    # 完整记录：保留 tools 项目自带的 name / display_name / description / doc_md，并合并端口
+    if "name" in body:
+        record = dict(body)
+        if not record.get("display_name"):
+            record["display_name"] = record.get("name")
+        if record.get("port") in (None, ""):
+            hp = record.get("host_port")
+            record["port"] = hp if hp not in (None, "") else None
+        return record
+
+    # 简化记录：由 container_name 派生唯一 name 与默认 doc_md
+    if "container_name" in body or "host_port" in body or "agent_type" in body:
         container_name = str(body.get("container_name") or "").strip()
         if not container_name:
             raise ValueError("container_name is required")
