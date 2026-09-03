@@ -99,6 +99,13 @@ def run():
     check("control format_item has registered", '"registered": tools_hub.get_tool_file' in app)
     check("control UI has register-toggle", "register-toggle" in app)
 
+    # 4b) 工具与普通容器统一：无工具专用端口段/专用创建分支
+    for bad_token in ("TOOL_START_PORT", "TOOL_END_PORT", "TOOL_INITIAL_MESSAGE",
+                      "find_tool_port", "is_tool", "fork_tool_agent",
+                      "__FORK_TOOL__", "hermit.tool"):
+        check("control/app.py no %s" % bad_token, bad_token not in app)
+    check("control create_agent no tool param", "def create_agent(agent_type, custom_name, body=None):" in app)
+
     # 5) Python 语法编译
     import py_compile
     for rel in ("control/app.py", "tools/hub/app.py", "tools/hub/registry.py",
