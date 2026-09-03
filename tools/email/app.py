@@ -34,12 +34,10 @@ SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 IMAP_SERVER = "imap.qq.com"
 IMAP_PORT = 993
-HOST_PORT = int(os.environ.get("HOST_PORT", "0"))
 TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:19081")
 
 # Email 工具注册信息
 EMAIL_TOOL_INFO = {
-    "port": HOST_PORT,
     "name": "email",
     "display_name": "Email 邮件",
     "description": "SMTP 发信 + IMAP 收件查询服务，支持白名单过滤、附件发送",
@@ -89,7 +87,7 @@ def register_tool():
             headers={"Content-Type": "application/json"}
         )
         urllib.request.urlopen(req, timeout=10)
-        print(f"[register] Email tool registered on port {HOST_PORT}", flush=True)
+        print("[register] Email tool registered", flush=True)
     except Exception as e:
         print(f"[register] WARNING: tool registration failed: {e}", flush=True)
 # Pydantic模型定义
@@ -352,4 +350,4 @@ async def send_email_with_files(
 if __name__ == "__main__":
     import uvicorn
     register_tool()
-    uvicorn.run(app, host="0.0.0.0", port=5030)
+    uvicorn.run(app, host="0.0.0.0", port=8082)

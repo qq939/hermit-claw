@@ -93,8 +93,8 @@ pre {{ margin:0; padding:12px; background:rgba(0,0,0,0.3); border-radius:8px; ov
     return hub
 
 
-def run_hub(tools_hub_port=TOOLS_HUB_PORT_DEFAULT, host="0.0.0.0", port=8081):
-    """启动 Hub 服务（阻塞），监听 8081。供 control 进程内线程或独立运行调用。"""
+def run_hub(tools_hub_port=TOOLS_HUB_PORT_DEFAULT, host="0.0.0.0", port=8082):
+    """启动 Hub 服务（阻塞），监听 8082。供 control 进程内线程或独立运行调用。"""
     from werkzeug.serving import make_server
 
     hub_app = create_tools_hub_app(tools_hub_port)

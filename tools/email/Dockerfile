@@ -15,8 +15,8 @@ COPY asset/ asset/
 
 RUN mkdir -p /var/log && chmod 777 /var/log
 
-ENV PORT=5030
+ENV PORT=8082
 
-EXPOSE 5030
+EXPOSE 8082
 
 CMD ["python", "-u", "app.py"]

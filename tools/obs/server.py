@@ -23,14 +23,12 @@ load_dotenv("env")
 load_dotenv("asset/.env")
 
 # 服务器配置
-PORT = int(os.environ.get("PORT", 8088))
+PORT = int(os.environ.get("PORT", 8082))
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "obs")
-HOST_PORT = int(os.environ.get("HOST_PORT", "0"))
 TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:19081")
 
 # OBS 工具注册信息
 OBS_TOOL_INFO = {
-    "port": HOST_PORT,
     "name": "obs",
     "display_name": "OBS 图床",
     "description": "文件托管、存储桶、断点续传、公告板(WebSocket)服务",
@@ -84,7 +82,7 @@ def register_tool():
             headers={"Content-Type": "application/json"}
         )
         urlopen_req(req, timeout=10)
-        print(f"[register] OBS tool registered on port {HOST_PORT}", flush=True)
+        print("[register] OBS tool registered", flush=True)
     except Exception as e:
         print(f"[register] WARNING: tool registration failed: {e}", flush=True)
 

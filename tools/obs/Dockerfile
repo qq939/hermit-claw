@@ -13,8 +13,8 @@ COPY .env .
 
 RUN mkdir -p obs obs/.chunks
 
-ENV PORT=8088
+ENV PORT=8082
 
-EXPOSE 8088
+EXPOSE 8082
 
 CMD ["python", "server.py"]
