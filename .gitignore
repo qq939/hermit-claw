@@ -1,10 +1,12 @@
 .trae/
 .venv/
 venv/
-config/*
-config/rules/*
 !config/rules/systemreadme.md
 !config/rules/run_claude.js
+!config/claude/config.json.*
+!config/claude/settings.json.*
+config/*
+config/rules/*
 node_modules/
 uploads/
 __pycache__/
