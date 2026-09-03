@@ -66,10 +66,10 @@ def run():
 
     # 2) 关键 19xxx 端口就位
     check("control/app.py has TOOLS_HUB_PORT=19081", "TOOLS_HUB_PORT = 19081" in read("control/app.py"))
-    check("control/app.py has START_HOST_PORT=19082", "START_HOST_PORT = 19082" in read("control/app.py"))
+    check("control/app.py has START_HOST_PORT=19081", "START_HOST_PORT = 19081" in read("control/app.py"))
     check("control/app.py has END_HOST_PORT=19999", "END_HOST_PORT = 19999" in read("control/app.py"))
     check("docker-compose.yml maps 19080:8080", "19080:8080" in read("docker-compose.yml"))
-    check("docker-compose.yml maps 19081:8081", "19081:8081" in read("docker-compose.yml"))
+    check("docker-compose.yml no 19081:8081", "19081:8081" not in read("docker-compose.yml"))
     check("docker-compose.yml maps 19790:18790", "19790:18790" in read("docker-compose.yml"))
     check("tools/hub/app.py default 19081", "TOOLS_HUB_PORT_DEFAULT = 19081" in read("tools/hub/app.py"))
     check("tools/obs/server.py hub 19081", "host.docker.internal:19081" in read("tools/obs/server.py"))
@@ -95,7 +95,7 @@ def run():
     check("control imports tools.hub registry", "from tools.hub import registry as tools_hub" in app)
     check("control has POST register endpoint", '@app.post("/api/agents/<path:name>/register")' in app)
     check("control has DELETE register endpoint", '@app.delete("/api/agents/<path:name>/register")' in app)
-    check("control starts run_hub thread", "from tools.hub.app import run_hub" in app)
+    check("control no embedded run_hub thread", "from tools.hub.app import run_hub" not in app)
     check("control format_item has registered", '"registered": tools_hub.get_tool_file' in app)
     check("control UI has register-toggle", "register-toggle" in app)
 

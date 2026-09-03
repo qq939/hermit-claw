@@ -33,7 +33,6 @@ services:
     restart: unless-stopped
     ports:
       - "19080:8080"
-      - "19081:8081"
     environment:
       - HOST_CONFIG_ROOT=${PWD}/config
       - HOST_WORKSPACES_ROOT=${PWD}/workspaces

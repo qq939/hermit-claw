@@ -43,12 +43,10 @@ from tools.hub import registry as tools_hub
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
-# 注意：19081 被 Tools Hub 占用（docker-compose.yml 中 19081:8081），普通容器从 19082 起分配。
-START_HOST_PORT = 19082
+START_HOST_PORT = 19081
 # Used in find_next_port (line 76) as the upper bound for generated host ports.
 END_HOST_PORT = 19999
-# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（19081），提供对接文档首页 + /api/tools 接口
-# 使用位置：api_register_agent 注册 doc、__main__ 中 run_hub 线程启动
+# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（19081），由独立容器 19081-hub 提供对接文档首页 + /api/tools 接口
 TOOLS_HUB_PORT = 19081
 # Used in create_agent (line 123) and API responses to enforce fixed in-container service port.
 SERVICE_PORT = 8082
@@ -2617,6 +2615,4 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    from tools.hub.app import run_hub
-    threading.Thread(target=run_hub, kwargs={"tools_hub_port": TOOLS_HUB_PORT}, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)

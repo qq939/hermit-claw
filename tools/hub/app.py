@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Hermit Tools Hub Flask app（19081 对接文档首页 + /api/tools 接口）。
 
-由 control/app.py 通过 `from tools.hub.app import create_tools_hub_app` 引用，
-在 control 容器内监听 8081（宿主机 19081）。
+独立运行于 19081-hub 容器（宿主机 19081），提供对接文档首页与 /api/tools 接口。
 """
 import html
 
