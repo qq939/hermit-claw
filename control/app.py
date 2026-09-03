@@ -43,7 +43,8 @@ from tools.hub import registry as tools_hub
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
-START_HOST_PORT = 19081
+# 注意：19081 被 Tools Hub 占用（docker-compose.yml 中 19081:8081），普通容器从 19082 起分配。
+START_HOST_PORT = 19082
 # Used in find_next_port (line 76) as the upper bound for generated host ports.
 END_HOST_PORT = 19999
 # TOOLS_HUB_PORT: 工具 Hub 宿主机端口（19081），提供对接文档首页 + /api/tools 接口

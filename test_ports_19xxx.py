@@ -66,7 +66,7 @@ def run():
 
     # 2) 关键 19xxx 端口就位
     check("control/app.py has TOOLS_HUB_PORT=19081", "TOOLS_HUB_PORT = 19081" in read("control/app.py"))
-    check("control/app.py has START_HOST_PORT=19081", "START_HOST_PORT = 19081" in read("control/app.py"))
+    check("control/app.py has START_HOST_PORT=19082", "START_HOST_PORT = 19082" in read("control/app.py"))
     check("control/app.py has END_HOST_PORT=19999", "END_HOST_PORT = 19999" in read("control/app.py"))
     check("docker-compose.yml maps 19080:8080", "19080:8080" in read("docker-compose.yml"))
     check("docker-compose.yml maps 19081:8081", "19081:8081" in read("docker-compose.yml"))
