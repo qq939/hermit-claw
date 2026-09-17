@@ -457,6 +457,13 @@ def create_app(docker_client=None):
         # SessionEnd 钩子需要正确的容器名，Docker 默认 HOSTNAME 是容器 ID
         env_vars["HOSTNAME"] = container_name
 
+        # 读取额外的端口映射
+        port_map = {f"{SERVICE_PORT}/tcp": host_port}
+        for p in _read_port_config(container_name):
+            parts = str(p).split(":")
+            if len(parts) == 2:
+                port_map[f"{parts[0]}/tcp"] = int(parts[1])
+
         container = docker_client_or_default().containers.run(
             spec["image"],
             name=container_name,
@@ -466,7 +473,7 @@ def create_app(docker_client=None):
             user=AGENT_RUNTIME_USER,
             environment=env_vars,
             labels=labels,
-            ports={f"{SERVICE_PORT}/tcp": host_port},
+            ports=port_map,
             volumes=volumes,
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
@@ -606,7 +613,7 @@ def create_app(docker_client=None):
                 "hermit.host_port": str(host_port),
                 "hermit.service_port": str(SERVICE_PORT),
             },
-            ports={f"{SERVICE_PORT}/tcp": host_port},
+            ports={f"{SERVICE_PORT}/tcp": host_port, **{p.split(":")[0]+"/tcp": int(p.split(":")[1]) for p in _read_port_config(container_name) if ":" in p}},
             volumes=volumes,
             restart_policy={"Name": "unless-stopped"},
             log_config=log_config,
@@ -707,6 +714,7 @@ def create_app(docker_client=None):
             "logs": _tail_logs(container, tail=200),
             "state": agent_states.get(container.name, "idle"),
             "registered": tools_hub.get_tool_file(tools_hub.derive_tool_name(container.name)) is not None,
+            "ports": _read_port_config(container.name),
         }
         return item
 
@@ -1618,6 +1626,72 @@ def create_app(docker_client=None):
         removed = tools_hub.unregister_tool_file(tool_name)
         return jsonify({"ok": True, "removed": bool(removed)})
 
+    def _port_config_path(container_name):
+        """容器工作目录下的 config/port.txt 路径。"""
+        host_ws = app.config.get("HOST_WORKSPACES_ROOT") or ""
+        return os.path.join(host_ws, container_name, "config", "port.txt")
+
+    def _read_port_config(container_name):
+        """读取容器端口配置列表，返回 [ "8083:19083", "8084:19084" ]。"""
+        path = _port_config_path(container_name)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "r", encoding="utf-8") as f:
+                lines = [l.rstrip() for l in f if l.strip()]
+            return lines
+        except Exception:
+            return []
+
+    def _write_port_config(container_name, ports):
+        """写入端口配置到容器 config/port.txt。"""
+        path = _port_config_path(container_name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            for p in ports:
+                f.write(p.strip() + "\n")
+        # 同步到容器内
+        try:
+            container = docker_client_or_default().containers.get(container_name)
+            content = "\n".join(ports) + "\n"
+            import base64
+            b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+            container.exec_run(
+                ["sh", "-c", f"mkdir -p /home/agent/.claude/workspace/project/config && echo '{content}' > /home/agent/.claude/workspace/project/config/port.txt"],
+                user=AGENT_RUNTIME_USER
+            )
+        except Exception:
+            pass
+
+    @app.post("/api/agents/<path:name>/ports")
+    def api_update_ports(name):
+        """更新容器端口映射：写入 config/port.txt 并重建容器。"""
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        body = request.get_json(silent=True) or {}
+        ports = body.get("ports") or []
+        # 验证格式：container_port:host_port
+        import re
+        _PORT_RE = re.compile(r"^\d+:\d+$")
+        for p in ports:
+            if not _PORT_RE.match(str(p)):
+                return jsonify({"error": f"Invalid format: {p} (expected container_port:host_port)"}), 400
+        _write_port_config(name, [str(p) for p in ports])
+        # 解析出 host_port 列表用于重建
+        extra_ports = []
+        for p in ports:
+            parts = str(p).split(":")
+            if len(parts) == 2:
+                extra_ports.append({"container": int(parts[0]), "host": int(parts[1])})
+        try:
+            recreate_agent(name)
+        except Exception as e:
+            return jsonify({"error": f"Recreate failed: {e}"}), 500
+        return jsonify({"ok": True, "mappings": [f"{p['container']}:{p['host']}" for p in extra_ports]})
+
     @app.get("/")
     def index():
         poll_ms = 5000
@@ -1762,6 +1836,12 @@ def create_app(docker_client=None):
         margin-left: 0;
       }}
       .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
+      .register-btn {{ background: #374151; color: #d1d5db; border: 1px solid #4b5563; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }}
+      .register-btn:hover {{ background: #4b5563; }}
+      .register-btn[data-registered="1"] {{ background: #16a34a; color: #fff; border-color: #15803d; }}
+      .register-btn[data-registered="1"]:hover {{ background: #15803d; }}
+      .port-btn {{ background: #374151; color: #d1d5db; border: 1px solid #4b5563; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }}
+      .port-btn:hover {{ background: #4b5563; }}
       .cmd-bar {{
         display: flex;
         gap: 8px;
@@ -2002,9 +2082,8 @@ def create_app(docker_client=None):
             <button data-action="recreate">重建</button>
             <button data-action="cleanup-context">清理上下文</button>
             <button data-action="init">发送初始消息</button>
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:rgba(255,255,255,0.85);">
-              <input type="checkbox" class="register-toggle" data-action="register" ${{item.registered ? 'checked' : ''}} /> 注册
-            </label>
+            <button class="register-btn" data-action="register" data-registered="${{item.registered ? '1' : '0'}}">${{item.registered ? '已注册' : '注册'}}</button>
+            <button class="port-btn" data-action="port" data-ports="${{(item.ports || []).join('\n')}}">端口</button>
           </div>
           <div class="cmd-bar">
             <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
@@ -2191,19 +2270,44 @@ def create_app(docker_client=None):
           logBox.textContent += `\n(上下文已清理) ${{d.output || ""}}\n`;
         }};
         
-        const registerToggle = div.querySelector('.register-toggle');
-        if (registerToggle) {{
-          registerToggle.onchange = async (e) => {{
-            const register = e.target.checked;
+        const registerBtn = div.querySelector('.register-btn');
+        if (registerBtn) {{
+          registerBtn.onclick = async () => {{
+            const wasRegistered = registerBtn.dataset.registered === '1';
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/register`;
-            const r = await fetch(url, {{ method: register ? "POST" : "DELETE" }});
+            const r = await fetch(url, {{ method: wasRegistered ? "DELETE" : "POST" }});
             if (!r.ok) {{
-              registerToggle.checked = !register;
               const d = await r.json();
               logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
               return;
             }}
-            logBox.textContent += register ? `\n[已注册] 调用指南已写入 19081 Hub docs\n` : `\n[已取消注册]\n`;
+            const nowRegistered = !wasRegistered;
+            registerBtn.textContent = nowRegistered ? '已注册' : '注册';
+            registerBtn.dataset.registered = nowRegistered ? '1' : '0';
+            logBox.textContent += nowRegistered
+              ? `\n[已注册] 调用指南已写入 19081 Hub docs\n`
+              : `\n[已取消注册]\n`;
+          }};
+        }}
+
+        const portBtn = div.querySelector('.port-btn');
+        if (portBtn) {{
+          portBtn.onclick = () => {{
+            const currentPorts = portBtn.dataset.ports || '';
+            const val = prompt('输入端口映射（格式：container_port:host_port，每行一个）：\n' + (currentPorts ? '当前:\n' + currentPorts + '\n' : ''));
+            if (val === null) return;
+            if (!val.trim() && !currentPorts) return;
+            fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/ports`, {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ ports: val.trim() ? val.trim().split(/\\r?\\n/).filter(l => l.trim()) : [] }}),
+            }}).then(r => r.json()).then(d => {{
+              if (d.error) {{
+                logBox.textContent += `\nERROR: ${{d.error}}\n`;
+              }} else {{
+                logBox.textContent += `\n[端口已更新] ${{d.mappings ? d.mappings.join(', ') : ''}} 容器重建中...\n`;
+              }}
+            }}).catch(e => {{ logBox.textContent += `\nERROR: ${{e}}\n`; }});
           }};
         }}
         
