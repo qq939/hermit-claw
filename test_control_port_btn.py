@@ -58,8 +58,8 @@ def run():
     check("_port_config_path exists", "def _port_config_path" in app)
     check("_read_port_config exists", "def _read_port_config" in app)
     check("_write_port_config exists", "def _write_port_config" in app)
-    # 4b) _port_config_path 读环境变量而非 app.config（修复 NameError）
-    check("_port_config_path uses env var", "os.environ.get(HOST_WORKSPACES_ROOT_ENV)" in app)
+    # 4b) _port_config_path 在 create_app 内、可访问 app.config
+    check("_port_config_path uses app.config", 'host_ws = app.config["HOST_WORKSPACES_ROOT"]' in app)
 
     # 5) POST ports 接口
     check("POST /api/agents/<name>/ports", '@app.post("/api/agents/<path:name>/ports")' in app)

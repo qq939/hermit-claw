@@ -1627,8 +1627,8 @@ def create_app(docker_client=None):
         return jsonify({"ok": True, "removed": bool(removed)})
 
     def _port_config_path(container_name):
-        """容器工作目录下的 config/port.txt 路径（读环境变量，兼容模块级调用）。"""
-        host_ws = os.environ.get(HOST_WORKSPACES_ROOT_ENV) or ""
+        """容器工作目录下的 config/port.txt 路径。"""
+        host_ws = app.config["HOST_WORKSPACES_ROOT"]
         return os.path.join(host_ws, container_name, "config", "port.txt")
 
     def _read_port_config(container_name):
@@ -2083,7 +2083,7 @@ def create_app(docker_client=None):
             <button data-action="cleanup-context">清理上下文</button>
             <button data-action="init">发送初始消息</button>
             <button class="register-btn" data-action="register" data-registered="${{item.registered ? '1' : '0'}}">${{item.registered ? '已注册' : '注册'}}</button>
-            <button class="port-btn" data-action="port" data-ports="${{(item.ports || []).join('\n')}}">端口</button>
+            <button class="port-btn" data-action="port" data-ports="${{(item.ports || []).join('\\n')}}">端口</button>
           </div>
           <div class="cmd-bar">
             <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
@@ -2294,7 +2294,7 @@ def create_app(docker_client=None):
         if (portBtn) {{
           portBtn.onclick = () => {{
             const currentPorts = portBtn.dataset.ports || '';
-            const val = prompt('输入端口映射（格式：container_port:host_port，每行一个）：\n' + (currentPorts ? '当前:\n' + currentPorts + '\n' : ''));
+            const val = prompt('输入端口映射（格式：container_port:host_port，每行一个）：\\n' + (currentPorts ? '当前:\\n' + currentPorts + '\\n' : ''));
             if (val === null) return;
             if (!val.trim() && !currentPorts) return;
             fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/ports`, {{
