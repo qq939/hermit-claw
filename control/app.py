@@ -1836,12 +1836,9 @@ def create_app(docker_client=None):
         margin-left: 0;
       }}
       .actions {{ display:flex; flex-wrap:wrap; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
-      .register-btn {{ background: #374151; color: #d1d5db; border: 1px solid #4b5563; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }}
-      .register-btn:hover {{ background: #4b5563; }}
+      /* 注册/端口按钮复用默认 button 样式，仅"已注册"态为绿色 */
       .register-btn[data-registered="1"] {{ background: #16a34a; color: #fff; border-color: #15803d; }}
       .register-btn[data-registered="1"]:hover {{ background: #15803d; }}
-      .port-btn {{ background: #374151; color: #d1d5db; border: 1px solid #4b5563; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }}
-      .port-btn:hover {{ background: #4b5563; }}
       .cmd-bar {{
         display: flex;
         gap: 8px;

@@ -74,10 +74,16 @@ def run():
     recreate_ports = re.search(r'def recreate_agent.*?ports=\{', app, re.DOTALL)
     check("recreate_agent uses port config", recreate_ports is not None)
 
-    # 8) CSS 样式
-    check("register-btn CSS exists", ".register-btn {" in app)
-    check("register-btn green for registered", "16a34a" in app)  # 绿色
-    check("port-btn CSS exists", ".port-btn {" in app)
+    # 8) CSS 样式：注册/端口按钮必须复用默认 button 样式，不得自定义基础样式
+    #    （默认 button 规则：border-radius:10px / padding:10px 12px / background:rgba(255,255,255,0.08)）
+    check("register-btn no custom base style", ".register-btn {{" not in app)
+    check("register-btn no custom hover", ".register-btn:hover {{" not in app)
+    check("port-btn no custom base style", ".port-btn {{" not in app)
+    check("port-btn no custom hover", ".port-btn:hover {{" not in app)
+    # 已注册态仍为绿色
+    check("register-btn green when registered",
+          '.register-btn[data-registered="1"] {{' in app)
+    check("register-btn green color", "16a34a" in app)
     # 8b) .actions 必须允许换行，否则窄窗口下末尾按钮被 .card{overflow:hidden} 裁掉
     actions_css = re.search(r"\.actions \{\{([^}]*)\}\}", app)
     check(".actions has flex-wrap", actions_css is not None and "flex-wrap" in actions_css.group(1))
