@@ -1627,8 +1627,8 @@ def create_app(docker_client=None):
         return jsonify({"ok": True, "removed": bool(removed)})
 
     def _port_config_path(container_name):
-        """容器工作目录下的 config/port.txt 路径。"""
-        host_ws = app.config.get("HOST_WORKSPACES_ROOT") or ""
+        """容器工作目录下的 config/port.txt 路径（读环境变量，兼容模块级调用）。"""
+        host_ws = os.environ.get(HOST_WORKSPACES_ROOT_ENV) or ""
         return os.path.join(host_ws, container_name, "config", "port.txt")
 
     def _read_port_config(container_name):
