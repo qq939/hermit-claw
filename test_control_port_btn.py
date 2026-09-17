@@ -78,6 +78,9 @@ def run():
     check("register-btn CSS exists", ".register-btn {" in app)
     check("register-btn green for registered", "16a34a" in app)  # 绿色
     check("port-btn CSS exists", ".port-btn {" in app)
+    # 8b) .actions 必须允许换行，否则窄窗口下末尾按钮被 .card{overflow:hidden} 裁掉
+    actions_css = re.search(r"\.actions \{\{([^}]*)\}\}", app)
+    check(".actions has flex-wrap", actions_css is not None and "flex-wrap" in actions_css.group(1))
 
     # 9) 编译通过
     import py_compile

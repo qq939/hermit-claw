@@ -1835,7 +1835,7 @@ def create_app(docker_client=None):
         flex-wrap: wrap;
         margin-left: 0;
       }}
-      .actions {{ display:flex; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
+      .actions {{ display:flex; flex-wrap:wrap; gap:8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
       .register-btn {{ background: #374151; color: #d1d5db; border: 1px solid #4b5563; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }}
       .register-btn:hover {{ background: #4b5563; }}
       .register-btn[data-registered="1"] {{ background: #16a34a; color: #fff; border-color: #15803d; }}
