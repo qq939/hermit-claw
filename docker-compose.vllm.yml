@@ -1,5 +1,10 @@
 # 本地 vLLM（Qwen3.8-27B W4A16）—— 供 hermit 的 localqwen profile 使用。
 #
+# ⚠️ 真值源已迁到模型目录： C:\Users\qq939\Downloads\qwen38\docker-compose.yml
+#    （模型与 compose 放同一目录，直接在该目录 `docker compose up -d` 即可）
+#    本文件只是仓库内的镜像副本，仅作参考；改参数请改那边，避免两边漂移。
+#    run-vllm-qwen38.ps1 默认调用 qwen38 里的那份，仅在找不到时才回退到本文件。
+#
 # 为什么单独一个 compose：vllm-qwen38 原来是手工 docker run 的（无 compose、restart=no），
 # 参数一丢就得重新踩坑。这里把"跑通 Claude Code 的全部参数"声明化，重启机器也会自动拉起。
 #
