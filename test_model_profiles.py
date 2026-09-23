@@ -103,6 +103,26 @@ def run():
         check("%s settings primaryModel" % p, sett.get("primaryModel") == model)
         check("%s settings base_url matches config" % p,
               (sett.get("env") or {}).get("ANTHROPIC_BASE_URL") == base_url)
+        # 关键：容器里的 claude CLI 只读 settings.json 的 env（config.json 是 hermit GUI 的配置，CLI 不读），
+        # settings.json 缺模型键 → CLI 用内置默认模型名 → 端点报 model not found（localqwen 实测 404）。
+        for k in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+            check("%s settings env %s=%s" % (p, k, model),
+                  (sett.get("env") or {}).get(k) == model)
+
+    # 7b) 无后缀默认配置（新建 / 重启容器拿它当种子）同样必须带模型键
+    default_settings = os.path.join(CLAUDE_DIR, "settings.json")
+    default_config = os.path.join(CLAUDE_DIR, "config.json")
+    if os.path.isfile(default_settings) and os.path.isfile(default_config):
+        denv, _ = first_provider_env(read_json(default_config))
+        dsett_env = (read_json(default_settings).get("env") or {})
+        dmodel = denv.get("ANTHROPIC_MODEL")
+        check("default settings ANTHROPIC_MODEL=%s" % dmodel,
+              bool(dmodel) and dsett_env.get("ANTHROPIC_MODEL") == dmodel)
+        check("default settings base_url matches default config",
+              dsett_env.get("ANTHROPIC_BASE_URL") == denv.get("ANTHROPIC_BASE_URL"))
+    else:
+        skip("default settings/config model keys", "files not found")
 
     # 8) 线上 API 能列出这 4 个 profile
     #    注意：宿主 curl localhost:19080 可能被沙箱/端口转发误导，
