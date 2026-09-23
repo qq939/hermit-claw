@@ -1246,34 +1246,223 @@ def create_app(docker_client=None):
 
         return jsonify({"ok": True, "profile": profile, "restarted": True})
 
-    @app.get("/api/agents/<path:name>/current-model")
-    def api_current_model(name):
-        """读取容器内 settings.json 的 ANTHROPIC_BASE_URL，判断当前激活的模型"""
+    # ------------------------------------------------------------------
+    # 模型读取（纯只读，不修改任何容器）
+    #
+    # 只信容器内真实文件，不做"域名猜模型名"：
+    #   settings.json → env.ANTHROPIC_BASE_URL     （容器实际连的端点）
+    #   config.json   → claude.providers[*].name   （provider 显示名）
+    #                   ...settingsConfig.env.ANTHROPIC_MODEL（精确模型 id）
+    # 再拿这三项去和宿主机 config/claude/ 下的 profile 变体做精确匹配，
+    # 得到 profile 名（无后缀默认配置记为空串，label 为"默认配置"）。
+    # ------------------------------------------------------------------
+    def _read_text_file(path):
         try:
-            container = _require_managed(name)
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    def _parse_json_object(text):
+        try:
+            data = json.loads(text) if (text or "").strip() else {}
         except Exception:
-            return jsonify({"error": "Container not found"}), 404
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _read_container_text(container, path):
+        """读取容器内文件文本，失败返回空串。"""
         try:
             result = container.exec_run(
-                ["/bin/sh", "-lc", "cat /home/agent/.claude/settings.json 2>/dev/null"],
-                user=AGENT_RUNTIME_USER)
-            content = (result.output or b"").decode("utf-8", errors="replace") if isinstance(result.output, bytes) else str(result.output)
-            settings = json.loads(content)
-            base_url = settings.get("env", {}).get("ANTHROPIC_BASE_URL", "")
+                ["/bin/sh", "-lc", f"cat {path} 2>/dev/null"], user=AGENT_RUNTIME_USER)
+            output = result.output
+            if isinstance(output, bytes):
+                return output.decode("utf-8", errors="replace").strip()
+            return str(output or "").strip()
         except Exception:
-            return jsonify({"model": "unknown", "base_url": ""})
+            return ""
 
-        # 通过 ANTHROPIC_BASE_URL 匹配已知模型
-        model_map = {
-            "api.deepseek.com": "deepseek",
-            "api.minimaxi.com": "minimax",
+    def _first_provider(config_data):
+        """返回 config.json 里第一个 provider 的 (name, env)。"""
+        providers = (((config_data or {}).get("claude") or {}).get("providers") or {})
+        for provider in providers.values():
+            if not isinstance(provider, dict):
+                continue
+            env = ((provider.get("settingsConfig") or {}).get("env") or {})
+            return str(provider.get("name") or ""), (env if isinstance(env, dict) else {})
+        return "", {}
+
+    def _model_id_from_env(provider_env, provider_name):
+        return (str((provider_env or {}).get("ANTHROPIC_MODEL") or "")
+                or str((provider_env or {}).get("ANTHROPIC_DEFAULT_SONNET_MODEL") or "")
+                or str(provider_name or ""))
+
+    def _normalize_url(url):
+        return str(url or "").strip().rstrip("/")
+
+    def _host_model_profiles():
+        """扫描 config/claude/ 的 settings.json[.p] + config.json[.p]。
+
+        返回列表：第 0 项是无后缀默认配置，其余按 profile 名排序。
+        """
+        config_dir = os.path.join(app.config.get("CONFIG_ROOT", "/config"), "claude")
+        suffixes = set()
+        try:
+            for entry in os.listdir(config_dir):
+                m = re.match(r"^(?:config|settings)\.json\.(.+)$", entry)
+                if m:
+                    suffixes.add(m.group(1))
+        except OSError:
+            pass
+
+        profiles = []
+        for profile in [""] + sorted(suffixes):
+            suffix = ("." + profile) if profile else ""
+            settings_data = _parse_json_object(
+                _read_text_file(os.path.join(config_dir, "settings.json" + suffix)))
+            config_data = _parse_json_object(
+                _read_text_file(os.path.join(config_dir, "config.json" + suffix)))
+            settings_env = settings_data.get("env") or {}
+            if not isinstance(settings_env, dict):
+                settings_env = {}
+            provider_name, provider_env = _first_provider(config_data)
+            profiles.append({
+                "profile": profile,
+                "label": profile or "默认配置",
+                "is_default": not profile,
+                "base_url": str(settings_env.get("ANTHROPIC_BASE_URL")
+                                or provider_env.get("ANTHROPIC_BASE_URL") or ""),
+                "provider_name": provider_name,
+                "model_id": _model_id_from_env(provider_env, provider_name),
+            })
+        return profiles
+
+    def _match_profile(profiles, base_url, provider_name, model_id):
+        """按 base_url 精确匹配 profile，再用 provider 名 / 模型 id 消歧。"""
+        target = _normalize_url(base_url)
+        if not target:
+            return None
+        candidates = [p for p in profiles if _normalize_url(p["base_url"]) == target]
+        if not candidates:
+            return None
+        for key, value in (("provider_name", provider_name), ("model_id", model_id)):
+            if not value:
+                continue
+            narrowed = [p for p in candidates if p[key] == value]
+            if narrowed:
+                candidates = narrowed
+                if len(candidates) == 1:
+                    break
+        named = [p for p in candidates if not p["is_default"]]
+        return (named or candidates)[0]
+
+    @app.get("/api/agents/<path:name>/current-model")
+    def api_current_model(name):
+        """读取容器内真实模型配置（只读）。
+
+        返回容器自己文件里的精确模型信息：model_id / provider_name / base_url，
+        以及匹配到的宿主机 profile（`profile`），并列出不一致告警。
+        """
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except Exception:
+            return jsonify({"error": "Container not found"}), 404
+
+        settings_data = _parse_json_object(
+            _read_container_text(container, "/home/agent/.claude/settings.json"))
+        config_data = _parse_json_object(
+            _read_container_text(container, "/home/agent/.claude/config.json"))
+
+        settings_env = settings_data.get("env") or {}
+        if not isinstance(settings_env, dict):
+            settings_env = {}
+        base_url = str(settings_env.get("ANTHROPIC_BASE_URL") or "")
+        primary_model = str(settings_data.get("primaryModel") or "")
+
+        provider_name, provider_env = _first_provider(config_data)
+        config_base_url = str(provider_env.get("ANTHROPIC_BASE_URL") or "")
+        model_id = _model_id_from_env(provider_env, provider_name)
+
+        profiles = _host_model_profiles()
+        default_profile = profiles[0] if profiles else None
+        matched = _match_profile(profiles, base_url, provider_name, model_id)
+
+        # 建容器时把 settings.json 的 env 注入进了容器进程环境（control/app.py 创建容器处），
+        # 之后改文件/重启都不会更新它。实测（在容器里把进程 env 指向死端点，Claude 调用即失败）
+        # 表明：**进程 env 优先于 settings.json**，所以 env 才是"实际生效"的端点。
+        env_base_url = ""
+        try:
+            for entry in (((container.attrs or {}).get("Config") or {}).get("Env") or []):
+                if entry.startswith("ANTHROPIC_BASE_URL="):
+                    env_base_url = entry.split("=", 1)[1]
+                    break
+        except Exception:
+            env_base_url = ""
+
+        env_match = _match_profile(profiles, env_base_url, "", "") if env_base_url else None
+        in_sync = (not env_base_url) or (_normalize_url(env_base_url) == _normalize_url(base_url))
+
+        effective = {
+            "base_url": env_base_url or base_url,
+            "model_id": ((env_match or {}).get("model_id") or "") if env_base_url else model_id,
+            "provider_name": ((env_match or {}).get("provider_name") or "") if env_base_url else provider_name,
+            "profile": (env_match or {}).get("profile", "") if env_base_url else (matched or {}).get("profile", ""),
+            "profile_label": (env_match or {}).get("label", "") if env_base_url else (matched or {}).get("label", ""),
+            "source": "容器进程环境（创建容器时注入）" if env_base_url else "容器内 settings.json",
         }
-        model = "unknown"
-        for domain, name in model_map.items():
-            if domain in base_url:
-                model = name
-                break
-        return jsonify({"model": model, "base_url": base_url})
+        configured = {
+            "base_url": base_url,
+            "model_id": model_id,
+            "provider_name": provider_name,
+            "profile": (matched or {}).get("profile", ""),
+            "profile_label": (matched or {}).get("label", ""),
+            "source": "容器内 settings.json + config.json",
+        }
+
+        warnings = []
+        if not base_url:
+            warnings.append("读不到容器内 settings.json 的 ANTHROPIC_BASE_URL")
+        if not model_id:
+            warnings.append("读不到容器内 config.json 的模型信息")
+        if base_url and config_base_url and _normalize_url(base_url) != _normalize_url(config_base_url):
+            warnings.append("settings.json 与 config.json 的 base_url 不一致（config.json: %s）" % config_base_url)
+        if env_base_url and not in_sync:
+            warn = ("进程环境与容器文件不一致：实际生效 %s（%s），文件里写的是 %s（%s）——文件改动需重建容器才生效"
+                    % (env_base_url, effective["model_id"] or "端点不在现有 profile 中",
+                       base_url or "空", model_id or "?"))
+            warnings.append(warn)
+        if env_base_url and not env_match and in_sync:
+            warnings.append("生效端点 %s 不在现有 profile 中，模型名由端点侧决定" % env_base_url)
+        if default_profile and default_profile.get("base_url"):
+            if _normalize_url(base_url) != _normalize_url(default_profile["base_url"]):
+                warnings.append("容器文件落后于当前默认配置（默认: %s @ %s），重建后才会跟随" % (
+                    default_profile.get("model_id") or "?", default_profile["base_url"]))
+
+        # 头部字段：能确定"实际生效"时就用它，否则回落到文件里的值
+        headline = effective if (env_base_url and not in_sync) else configured
+        return jsonify({
+            "model": headline["model_id"],          # 兼容旧字段名：精确模型 id（生效值优先）
+            "model_id": headline["model_id"],
+            "provider_name": headline["provider_name"],
+            "base_url": headline["base_url"],
+            "profile": headline["profile"],
+            "profile_label": headline["profile_label"],
+            "effective": effective,
+            "configured": configured,
+            "in_sync": in_sync,
+            "env_base_url": env_base_url,
+            "config_base_url": config_base_url,
+            "primary_model": primary_model,
+            "is_default_config": bool(matched and matched["is_default"]),
+            "default_model_id": (default_profile or {}).get("model_id", ""),
+            "default_base_url": (default_profile or {}).get("base_url", ""),
+            "warnings": warnings,
+            "model_source": "%s → config.json:claude.providers[0].settingsConfig.env.ANTHROPIC_MODEL"
+                            % headline["source"],
+            "source": "container:/home/agent/.claude/{settings.json,config.json} + docker inspect env",
+        })
 
     def _check_email_replies():
         """检查所有追踪邮件是否被回复，更新 TTL"""
@@ -1828,6 +2017,54 @@ def create_app(docker_client=None):
       }}
       .profile-popup div:hover {{ background: rgba(58,227,116,0.15); color: #fff; }}
       .profile-popup div.active {{ color: #3AE374; font-weight: 600; }}
+      .profile-popup .model-info {{
+        padding: 8px 14px 6px 14px;
+        cursor: default;
+        max-width: 460px;
+        border-bottom: 1px solid rgba(255,255,255,0.18);
+      }}
+      .profile-popup .model-info:hover {{ background: none; }}
+      .profile-popup .model-info .row {{
+        padding: 0;
+        border-bottom: none;
+        font-size: 11px;
+        line-height: 1.5;
+        cursor: default;
+        color: #ddd;
+        display: flex;
+        gap: 6px;
+      }}
+      .profile-popup .model-info .row:hover {{ background: none; }}
+      .profile-popup .model-info .row .k {{ color: var(--muted); min-width: 84px; flex: none; }}
+      .profile-popup .model-info .row .v {{ word-break: break-all; }}
+      .profile-popup .model-info .row.warn {{ color: #FFB86C; }}
+      .profile-popup .model-info .row.warn .k {{ color: #FFB86C; }}
+      .profile-popup .model-info .row.dim .k,
+      .profile-popup .model-info .row.dim .v {{ color: #8b93a7; }}
+      .profile-popup .model-info .sub {{
+        padding: 7px 0 2px 0;
+        border-bottom: none;
+        font-size: 11px;
+        font-weight: 600;
+        color: #FFB86C;
+      }}
+      .profile-popup .model-info .sub:hover {{ background: none; }}
+      .profile-popup .model-info .head {{
+        padding: 0 0 4px 0;
+        border-bottom: none;
+        font-size: 12px;
+        font-weight: 600;
+        color: #3AE374;
+      }}
+      .profile-popup .model-info .head:hover {{ background: none; }}
+      .profile-popup .model-hint {{
+        padding: 6px 14px;
+        font-size: 10px;
+        color: var(--muted);
+        cursor: default;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+      }}
+      .profile-popup .model-hint:hover {{ background: none; }}
       .git-tools {{
         display: none;
         align-items: center;
@@ -2193,19 +2430,64 @@ def create_app(docker_client=None):
           if (old) {{ old.remove(); return; }}
 
           btn.textContent = "检测中...";
-          let currentModel = "unknown";
+          let modelInfo = null;
           try {{
             const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/current-model`);
-            const d = await r.json();
-            currentModel = d.model || "unknown";
+            modelInfo = await r.json();
           }} catch(err) {{}}
           btn.textContent = "切换模型";
+          if (!modelInfo) modelInfo = {{}};
+          const currentProfile = modelInfo.profile || "";
 
           const rect = btn.getBoundingClientRect();
           const popup = document.createElement("div");
           popup.className = "profile-popup model-popup";
           popup.style.top = (rect.bottom + 4) + "px";
           popup.style.left = rect.left + "px";
+
+          // 头部：实际生效的模型（进程 env 优先）与文件里写的模型分层展示，不做域名猜测
+          const infoBox = document.createElement("div");
+          infoBox.className = "model-info";
+          const addRow = (key, value, cls) => {{
+            const row = document.createElement("div");
+            row.className = "row" + (cls ? " " + cls : "");
+            const k = document.createElement("span");
+            k.className = "k";
+            k.textContent = key;
+            const v = document.createElement("span");
+            v.className = "v";
+            v.textContent = value;
+            row.appendChild(k);
+            row.appendChild(v);
+            infoBox.appendChild(row);
+          }};
+          const head = document.createElement("div");
+          head.className = "head";
+          head.textContent = (modelInfo.in_sync === false ? "实际生效：" : "当前模型：")
+            + (modelInfo.model_id || "未知（端点不在现有 profile 中）");
+          infoBox.appendChild(head);
+          addRow("Provider", modelInfo.provider_name || "未知");
+          addRow("生效端点", modelInfo.base_url || "未知");
+          addRow("匹配 profile", modelInfo.profile_label || "无匹配（自定义或旧配置）");
+
+          if (modelInfo.in_sync === false && modelInfo.configured) {{
+            const sub = document.createElement("div");
+            sub.className = "sub";
+            sub.textContent = "文件里写的（重建容器后才生效）";
+            infoBox.appendChild(sub);
+            addRow("模型", (modelInfo.configured.model_id || "未知"), "dim");
+            addRow("端点", (modelInfo.configured.base_url || "未知"), "dim");
+            addRow("profile", (modelInfo.configured.profile_label || "无匹配"), "dim");
+          }}
+          for (const w of (modelInfo.warnings || [])) {{
+            addRow("⚠", w, "warn");
+          }}
+          popup.appendChild(infoBox);
+
+          const hint = document.createElement("div");
+          hint.className = "model-hint";
+          hint.textContent = modelInfo.source || "读自容器内 settings.json + config.json";
+          popup.appendChild(hint);
 
           const profiles = profileData.profiles || [];
           if (profiles.length === 0) {{
@@ -2216,12 +2498,12 @@ def create_app(docker_client=None):
           }} else {{
             for (const p of profiles) {{
               const d = document.createElement("div");
-              d.textContent = p + (p === currentModel ? " [当前]" : "");
-              if (p === currentModel) d.className = "active";
+              d.textContent = p + (p === currentProfile ? " [当前]" : "");
+              if (p === currentProfile) d.className = "active";
               d.onclick = async (e2) => {{
                 e2.stopPropagation();
                 popup.remove();
-                if (p === currentModel) return;
+                if (p === currentProfile) return;
                 const confirmed = confirm(`切换 "${{item.container_name}}" 模型为 "${{p}}" 并重启容器，确定？`);
                 if (!confirmed) return;
                 logBox.textContent += `\n[切换模型 -> ${{p}}] 执行中...\n`;
