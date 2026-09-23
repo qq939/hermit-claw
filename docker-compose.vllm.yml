@@ -1,0 +1,68 @@
+# 本地 vLLM（Qwen3.8-27B W4A16）—— 供 hermit 的 localqwen profile 使用。
+#
+# 为什么单独一个 compose：vllm-qwen38 原来是手工 docker run 的（无 compose、restart=no），
+# 参数一丢就得重新踩坑。这里把"跑通 Claude Code 的全部参数"声明化，重启机器也会自动拉起。
+#
+# 用法：
+#   docker compose -f docker-compose.vllm.yml up -d      # 拉起
+#   docker compose -f docker-compose.vllm.yml logs -f    # 看加载日志
+#   curl http://localhost:8000/v1/models                 # 就绪检查 → qwen3.8-27b
+#
+# 关键参数（缺任一项 Claude Code 都跑不通，均已实测）：
+#   --enable-auto-tool-choice + --tool-call-parser qwen3_xml
+#       缺工具选择 → 400 "auto tool choice requires --enable-auto-tool-choice"
+#       解析器用 hermes 不报错，但工具调用会退化成纯文本，CLI 无法执行工具；
+#       该模型输出的是 Qwen 的 <tool_call><function=..><parameter=..> XML → 必须 qwen3_xml
+#   --max-model-len 49152
+#       Claude Code 单次要 21333 output tokens，加上 ~11.4k 的 prompt；
+#       4096/32768 都会直接 400（max_completion_tokens / 总长超限）
+#   --kv-cache-dtype fp8
+#       fp16 时 KV 只有 ~2.5GiB（17.7k tokens）装不下 32k+ 上下文；fp8 后 67.3k tokens
+#   --cpu-offload-gb 8
+#       27B W4A16 在 RTX 4080 16G 上装不下，必须把部分权重卸载到 CPU（代价：生成慢，约 2-3 tok/s）
+#
+# 注意：模型名必须从容器进程 env 或 settings.json 的 env 传进去；
+#       config/claude/settings.json[.p] 的 env 已带 ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*，
+#       重建容器时会被 control 注入进程 env。
+
+name: vllm
+
+services:
+  qwen38:
+    image: vllm/vllm-openai:v0.29.0
+    container_name: vllm-qwen38
+    restart: unless-stopped
+    ipc: host
+    shm_size: 16g
+    ports:
+      - "8000:8000"
+    volumes:
+      - C:/Users/qq939/Downloads/qwen38:/models
+    environment:
+      - HF_HUB_OFFLINE=1
+      - VLLM_WSL2_ENABLE_PIN_MEMORY=1
+    command:
+      - --model
+      - /models/models--bowmanslayer--Qwen3.8-27B-W4A16-vision-mtp/snapshots/3a57d8835438c865188e6ea039c11bbaa3353967
+      - --served-model-name
+      - qwen3.8-27b
+      - --max-model-len
+      - "49152"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --cpu-offload-gb
+      - "8"
+      - --enforce-eager
+      - --trust-remote-code
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
+      - --kv-cache-dtype
+      - fp8
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
