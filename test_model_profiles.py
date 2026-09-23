@@ -36,7 +36,14 @@ EXPECT = {
     "minimax-m2.7-highspeed": ("MiniMax-M2.7-highspeed", "https://api.minimax.cn/anthropic"),
     "deepseek": ("deepseek-v4-flash", "https://api.deepseek.com/anthropic"),
     "deepseek-flash": ("deepseek-flash", "https://api.deepseek.com/anthropic"),
+    # 本地 vLLM 服务（docker 容器 vllm-qwen38，OpenAI + Anthropic 双协议）
+    "localqwen": ("qwen3.8-27b", "http://host.docker.internal:8000"),
 }
+
+# 本地 vLLM 实测目标：容器名 / 宿主地址 / 模型 id
+VLLM_CONTAINER = "vllm-qwen38"
+VLLM_HOST_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
+VLLM_MODEL = "qwen3.8-27b"
 
 failures = []
 skips = []
@@ -131,6 +138,60 @@ def run():
     else:
         for p in EXPECT:
             check("live profiles lists %s" % p, p in got)
+
+    # 9) 实测本地 vLLM 服务 vllm-qwen38
+    check_vllm()
+
+
+def _post_json(url, payload, headers=None, timeout=90):
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, json.loads(resp.read().decode("utf-8"))
+
+
+def check_vllm():
+    # 9a) OpenAI 协议 /v1/models 暴露的模型 id
+    try:
+        with urllib.request.urlopen(VLLM_HOST_URL + "/v1/models", timeout=20) as resp:
+            ids = [m.get("id") for m in (json.loads(resp.read().decode("utf-8")).get("data") or [])]
+        check("vllm /v1/models reachable", True)
+        check("vllm serves model %s" % VLLM_MODEL, VLLM_MODEL in ids)
+        print("   -> vllm model ids: %s" % ids, flush=True)
+    except Exception as e:
+        skip("vllm /v1/models", "unreachable: %s" % e)
+        return
+
+    # 9b) Anthropic 协议 /v1/messages（Claude Code 依赖此端点）
+    try:
+        status, body = _post_json(
+            VLLM_HOST_URL + "/v1/messages",
+            {"model": VLLM_MODEL, "max_tokens": 16,
+             "messages": [{"role": "user", "content": "reply with exactly: OK"}]},
+            headers={"anthropic-version": "2023-06-01", "x-api-key": "dummy"})
+        check("vllm /v1/messages status 200", status == 200)
+        check("vllm /v1/messages is anthropic shape",
+              body.get("type") == "message" and isinstance(body.get("content"), list)
+              and "usage" in body)
+    except Exception as e:
+        check("vllm /v1/messages status 200", False)
+        print("   -> %s" % e, flush=True)
+
+    # 9c) agent 容器内可达（配置里用的 host.docker.internal:8000）
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["docker", "exec", "19087-gpussh", "curl", "-s", "--max-time", "20",
+             "-o", "/dev/null", "-w", "%{http_code}",
+             "http://host.docker.internal:8000/v1/models"],
+            capture_output=True, text=True, timeout=40)
+        code = out.stdout.strip()
+        check("agent container reaches vllm via host.docker.internal", code == "200")
+        if code != "200":
+            print("   -> got %r %s" % (code, out.stderr.strip()[:120]), flush=True)
+    except Exception as e:
+        skip("agent container reaches vllm", "failed: %s" % e)
 
 
 if __name__ == "__main__":
