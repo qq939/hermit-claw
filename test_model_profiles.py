@@ -38,7 +38,13 @@ EXPECT = {
     "deepseek-flash": ("deepseek-flash", "https://api.deepseek.com/anthropic"),
     # 本地 vLLM 服务（docker 容器 vllm-qwen38，OpenAI + Anthropic 双协议）
     "localqwen": ("qwen3.8-27b", "http://host.docker.internal:8000"),
+    # 远程 web vLLM 服务（通过 dimond.top 反代暴露）
+    "webqwen": ("qwen/qwen3.8-27b", "http://dimond.top:21234"),
 }
+
+# 远程 webqwen 实测目标
+WEBQWEN_URL = os.environ.get("WEBQWEN_URL", "http://dimond.top:21234")
+WEBQWEN_MODEL = "qwen/qwen3.8-27b"
 
 # 本地 vLLM 实测目标：容器名 / 宿主地址 / 模型 id
 VLLM_CONTAINER = "vllm-qwen38"
