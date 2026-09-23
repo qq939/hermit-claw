@@ -1,21 +1,24 @@
 # -*- coding: utf-8 -*-
-"""TDD 校验：config/claude/ 下 4 个模型 profile 配置文件正确可用。
+"""TDD 校验：config/claude/ 下各模型 profile 配置文件正确可用。
 
-最终 4 个 profile（模型名已按官方文档核实）：
-  - minimax                  -> MiniMax-M3            @ https://api.minimax.cn/anthropic
+当前 profile（云端模型名已按官方文档核实）：
+  - minimax                  -> MiniMax-M3             @ https://api.minimax.cn/anthropic
   - minimax-m2.7-highspeed   -> MiniMax-M2.7-highspeed @ https://api.minimax.cn/anthropic
   - deepseek                 -> deepseek-v4-flash      @ https://api.deepseek.com/anthropic
   - deepseek-flash           -> deepseek-flash         @ https://api.deepseek.com/anthropic  (V4.1-Flash)
+  - localqwen                -> qwen3.8-27b            @ http://host.docker.internal:8000    (llama.cpp 容器 llama-qwen38)
+  - webqwen                  -> qwen/qwen3.8-27b       @ http://dimond.top:21234
 
 覆盖点：
-  1) 8 个文件存在（4 个 config.json.<p> + 4 个 settings.json.<p>）。
+  1) 每个 profile 两个文件都存在（config.json.<p> + settings.json.<p>）。
   2) config.json.X 的 ANTHROPIC_MODEL 为官方模型名。
   3) base_url 正确（minimax 用 api.minimax.cn，deepseek 用 api.deepseek.com）。
-  4) 4 个 config.json.X 都带 ANTHROPIC_AUTH_TOKEN（照抄原有 key，非空）。
+  4) 每个 config.json.X 都带 ANTHROPIC_AUTH_TOKEN（非空）。
   5) settings.json.X 的 env.ANTHROPIC_BASE_URL 与对应 config.json.X 一致。
   6) settings.json.X 的 primaryModel 对齐各自模型名。
   7) 全部 JSON 合法。
-  8) 线上 /api/config/profiles 能列出这 4 个 profile。
+  8) 线上 /api/config/profiles 能列出这些 profile。
+  9) localqwen 展示名与真实服务架构一致，且本地推理服务实测可达。
 
 超时机制：整个校验在守护线程中执行，主线程 join(timeout)，超时判失败。
 """
@@ -25,7 +28,7 @@ import sys
 import threading
 import urllib.request
 
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = 120
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CLAUDE_DIR = os.path.join(ROOT, "config", "claude")
 PROFILES_URL = os.environ.get("PROFILES_URL", "http://localhost:19080/api/config/profiles")
@@ -36,7 +39,7 @@ EXPECT = {
     "minimax-m2.7-highspeed": ("MiniMax-M2.7-highspeed", "https://api.minimax.cn/anthropic"),
     "deepseek": ("deepseek-v4-flash", "https://api.deepseek.com/anthropic"),
     "deepseek-flash": ("deepseek-flash", "https://api.deepseek.com/anthropic"),
-    # 本地 vLLM 服务（docker 容器 vllm-qwen38，OpenAI + Anthropic 双协议）
+    # 本地推理服务（llama.cpp 容器 llama-qwen38，OpenAI + Anthropic 双协议）
     "localqwen": ("qwen3.8-27b", "http://host.docker.internal:8000"),
     # 远程 web vLLM 服务（通过 dimond.top 反代暴露）
     "webqwen": ("qwen/qwen3.8-27b", "http://dimond.top:21234"),
@@ -46,10 +49,11 @@ EXPECT = {
 WEBQWEN_URL = os.environ.get("WEBQWEN_URL", "http://dimond.top:21234")
 WEBQWEN_MODEL = "qwen/qwen3.8-27b"
 
-# 本地 vLLM 实测目标：容器名 / 宿主地址 / 模型 id
-VLLM_CONTAINER = "vllm-qwen38"
-VLLM_HOST_URL = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
-VLLM_MODEL = "qwen3.8-27b"
+# 本地推理服务实测目标：容器名 / 宿主地址 / 模型 id
+# 2026-09 架构更换：vLLM 容器 vllm-qwen38 -> llama.cpp 容器 llama-qwen38，端口与模型名不变
+LOCAL_CONTAINER = "llama-qwen38"
+LOCAL_HOST_URL = os.environ.get("LOCAL_MODEL_URL", "http://127.0.0.1:8000")
+LOCAL_MODEL = "qwen3.8-27b"
 
 failures = []
 skips = []
@@ -165,8 +169,16 @@ def run():
         for p in EXPECT:
             check("live profiles lists %s" % p, p in got)
 
-    # 9) 实测本地 vLLM 服务 vllm-qwen38
-    check_vllm()
+    # 8b) localqwen 的展示名必须与真实服务架构一致（vLLM -> llama.cpp）
+    lq_cfg = os.path.join(CLAUDE_DIR, "config.json.localqwen")
+    if os.path.isfile(lq_cfg):
+        _, lq_provider = first_provider_env(read_json(lq_cfg))
+        lq_name = (lq_provider.get("name") or "")
+        check("localqwen provider name reflects llama.cpp", "llama" in lq_name.lower())
+        check("localqwen provider name no longer claims vLLM", "vllm" not in lq_name.lower())
+
+    # 9) 实测本地推理服务 llama-qwen38
+    check_local_model()
 
 
 def _post_json(url, payload, headers=None, timeout=90):
@@ -177,31 +189,44 @@ def _post_json(url, payload, headers=None, timeout=90):
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
-def check_vllm():
+def check_local_model():
+    # 9-pre) 本地推理容器确实在跑（架构更换后容器名是 llama-qwen38）
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", LOCAL_CONTAINER],
+            capture_output=True, text=True, timeout=30)
+        status = out.stdout.strip()
+        check("local container %s running" % LOCAL_CONTAINER, status == "running")
+        if status != "running":
+            print("   -> got %r %s" % (status, out.stderr.strip()[:120]), flush=True)
+    except Exception as e:
+        skip("local container running", "failed: %s" % e)
+
     # 9a) OpenAI 协议 /v1/models 暴露的模型 id
     try:
-        with urllib.request.urlopen(VLLM_HOST_URL + "/v1/models", timeout=20) as resp:
+        with urllib.request.urlopen(LOCAL_HOST_URL + "/v1/models", timeout=20) as resp:
             ids = [m.get("id") for m in (json.loads(resp.read().decode("utf-8")).get("data") or [])]
-        check("vllm /v1/models reachable", True)
-        check("vllm serves model %s" % VLLM_MODEL, VLLM_MODEL in ids)
-        print("   -> vllm model ids: %s" % ids, flush=True)
+        check("local model /v1/models reachable", True)
+        check("local model serves %s" % LOCAL_MODEL, LOCAL_MODEL in ids)
+        print("   -> model ids: %s" % ids, flush=True)
     except Exception as e:
-        skip("vllm /v1/models", "unreachable: %s" % e)
+        skip("local model /v1/models", "unreachable: %s" % e)
         return
 
     # 9b) Anthropic 协议 /v1/messages（Claude Code 依赖此端点）
     try:
         status, body = _post_json(
-            VLLM_HOST_URL + "/v1/messages",
-            {"model": VLLM_MODEL, "max_tokens": 16,
+            LOCAL_HOST_URL + "/v1/messages",
+            {"model": LOCAL_MODEL, "max_tokens": 16,
              "messages": [{"role": "user", "content": "reply with exactly: OK"}]},
             headers={"anthropic-version": "2023-06-01", "x-api-key": "dummy"})
-        check("vllm /v1/messages status 200", status == 200)
-        check("vllm /v1/messages is anthropic shape",
+        check("local model /v1/messages status 200", status == 200)
+        check("local model /v1/messages is anthropic shape",
               body.get("type") == "message" and isinstance(body.get("content"), list)
               and "usage" in body)
     except Exception as e:
-        check("vllm /v1/messages status 200", False)
+        check("local model /v1/messages status 200", False)
         print("   -> %s" % e, flush=True)
 
     # 9c) agent 容器内可达（配置里用的 host.docker.internal:8000）
@@ -213,11 +238,11 @@ def check_vllm():
              "http://host.docker.internal:8000/v1/models"],
             capture_output=True, text=True, timeout=40)
         code = out.stdout.strip()
-        check("agent container reaches vllm via host.docker.internal", code == "200")
+        check("agent container reaches local model via host.docker.internal", code == "200")
         if code != "200":
             print("   -> got %r %s" % (code, out.stderr.strip()[:120]), flush=True)
     except Exception as e:
-        skip("agent container reaches vllm", "failed: %s" % e)
+        skip("agent container reaches local model", "failed: %s" % e)
 
 
 if __name__ == "__main__":
