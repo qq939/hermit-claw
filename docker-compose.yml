@@ -34,8 +34,13 @@ services:
     ports:
       - "19080:8080"
     environment:
-      - HOST_CONFIG_ROOT=${PWD}/config
-      - HOST_WORKSPACES_ROOT=${PWD}/workspaces
+      # 注意：这里**故意不再**用 ${PWD} 传宿主机路径。
+      # ${PWD} 取的是「执行 compose 的那个 shell 的环境变量」：从别的目录跑 compose
+      # （例如在 DSH checkout 里 docker compose -f .../hermitclaw/docker-compose.yml up）
+      # 会把它烤成那个目录，之后新建/重建的卡片会把 /agent-config、/config、workspace
+      # 全挂到错误甚至空的目录上（实测：Hub 卡片挂到空目录后 web 服务直接起不来）。
+      # control 改为以自己容器的 /config、/workspaces 挂载源反推宿主机根目录（最可靠）。
+      # 确需强制指定时，才在这里显式加 HOST_CONFIG_ROOT / HOST_WORKSPACES_ROOT / HOST_TOOLS_ROOT。
       - PUBLIC_PREVIEW_BASE_URL=http://dimond.top
       - OPENCLAW_GATEWAY_HOST=172.30.0.10
       - OPENCLAW_GATEWAY_PORT=18790
@@ -47,8 +52,9 @@ services:
       - ./workspaces:/workspaces
       - ./logs:/logs
       - ./logs/hermit:/logs/hermit
-      - ${PWD}/../frpc:/Users/jimjiang/Downloads/frpc
-      - ${PWD}/../frp:/Users/jimjiang/Downloads/frp
+      # 相对路径按 compose 文件所在目录解析，与 ${PWD} 无关
+      - ../frpc:/Users/jimjiang/Downloads/frpc
+      - ../frp:/Users/jimjiang/Downloads/frp
       - ./config/rules:/config/rules
     networks:
       - openclaw-network

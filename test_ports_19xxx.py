@@ -96,7 +96,8 @@ def run():
     check("control has POST register endpoint", '@app.post("/api/agents/<path:name>/register")' in app)
     check("control has DELETE register endpoint", '@app.delete("/api/agents/<path:name>/register")' in app)
     check("control no embedded run_hub thread", "from tools.hub.app import run_hub" not in app)
-    check("control format_item has registered", '"registered": tools_hub.get_tool_file' in app)
+    # 注册状态现在由容器自己提交，判定要兼容「派生名」与记录里的 container_name
+    check("control format_item has registered", '"registered": _tool_record_for_container(container.name)' in app)
     check("control UI has register-btn", "register-btn" in app)
 
     # 4b) 工具与普通容器统一：无工具专用端口段/专用创建分支

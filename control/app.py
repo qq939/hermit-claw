@@ -76,6 +76,48 @@ HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
 # HOST_TOOLS_ROOT_ENV: 宿主机 tools 目录环境变量名，用于把 tools 源码挂载到每个容器卡片工作目录下。
 # 使用位置：create_app（解析 app.config["HOST_TOOLS_ROOT"]，约 L154）；create_agent / recreate_agent（读取 host_tools_root 并挂载 volume）。
 HOST_TOOLS_ROOT_ENV = "HOST_TOOLS_ROOT"
+
+# HUB_API_URL: 容器内访问 19081 Hub 注册接口的地址。
+# host.docker.internal 指向宿主机（19081 已发布到宿主机），比走公网域名更可靠。
+HUB_API_URL = "http://host.docker.internal:19081/api/tools"
+
+# REGISTER_MESSAGE: 面板「注册」按钮下达给容器的指令模板。
+# 设计要点：注册内容由**容器自己**按 Hub 规范与真实接口生成（功能性 API + /ask/claude），
+# control 不再代写固定记录 —— 否则 Hub 上的文档是模板套话，别的卡片照它调不通。
+REGISTER_MESSAGE = """【注册到 19081 Hub】请按 Hub 规范，把本容器的对外能力注册到 Hub。
+
+容器：{container}
+宿主机端口：{port}（对外调用地址统一用 http://dimond.top:{port}）
+Hub 注册接口（容器内可达）：POST {hub_api}
+注册名 name 必须是 "{tool_name}"（面板据此显示「已注册」；同名重复注册会覆盖旧记录）
+
+步骤：
+1) 先读规范：/agent-config/skills/hermit-tools-hub/SKILL.md，以及
+   /home/agent/.claude/workspace/config-rules/systemreadme.md 的「核心三、注册到 Hub」。
+2) 摸清本项目**真实**对外提供的接口（不要照抄模板/示例）：
+   - 功能性 API：HTTP 端点（方法 + 路径 + 用途）、WebSocket、上传/下载、静态页面等；
+   - 必带 /ask/claude（容器内 8082 端口的问答接口，其他容器卡片靠它与本卡片交流）。
+3) 生成完整注册记录，doc_md 用 Markdown 写「功能概览表 + API 端点表 + curl 调用示例」：
+   {{"name":"{tool_name}","display_name":"{container}","description":"<一句话>","port":{port},"container_name":"{container}","agent_type":"{agent_type}","doc_md":"<上面的 Markdown>"}}
+   建议先把记录写成 JSON 文件（如 /tmp/hub_reg.json），再 curl --data-binary @/tmp/hub_reg.json 提交，避免转义踩坑。
+4) 实际提交并确认 200：
+   curl -sS -X POST {hub_api} -H 'Content-Type: application/json' --data-binary @/tmp/hub_reg.json
+5) 总结里给出最终注册结果：name / port / 接口清单；若失败，附原始报错。
+只更新你自己的注册记录，不要修改 Hub 自身代码。"""
+
+
+def build_register_message(container_name, host_port, tool_name, agent_type):
+    """渲染「注册」指令。"""
+    return REGISTER_MESSAGE.format(container=container_name, port=host_port,
+                                   tool_name=tool_name, agent_type=agent_type or "claude",
+                                   hub_api=HUB_API_URL)
+
+
+# AGENT_UID / AGENT_GID: 容器内 agent 用户的 uid/gid（见 agents/claude/Dockerfile 的 useradd -u 501 -g 20）。
+# 注册表要被卡片里的 Hub 进程（以 agent 身份运行）写入，所以文件属主必须是它，否则 POST /api/tools 会 500。
+AGENT_UID = 501
+AGENT_GID = 20
+
 # agent_states: 容器卡片状态字典，key=container_name, value="idle"|"thinking"|"done"
 # "idle": 空闲（绿色） / "thinking": 思考中（黄色） / "done": 回答完毕（红色+闪烁）
 # 由 send-message(L942) 设 thinking，SessionEnd 钩子(L1008) 设 done，reset-state(L1008) 恢复 idle
@@ -202,6 +244,25 @@ def create_app(docker_client=None):
         app.config["HOST_LOGS_ROOT"] = os.path.join(os.path.dirname(_self_roots[1]), "logs")
         app.config["HOST_TOOLS_ROOT"] = (os.environ.get(HOST_TOOLS_ROOT_ENV)
                                         or os.path.join(os.path.dirname(_self_roots[1]), "tools"))
+
+    def _ensure_registry_file():
+        """确保注册表文件存在，且容器内 agent 用户（uid 501）可读写。
+
+        注册表会挂给卡片（见 _registry_volume），卡片里的 Hub 进程以 agent 身份运行，
+        需要能写这个文件，否则 Hub 的 POST /api/tools 会因为权限被拒而 500。
+        """
+        path = tools_hub.TOOLS_REGISTRY_PATH
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path):
+                tools_hub.save_registry(tools_hub.load_registry(), path)
+            os.chown(os.path.dirname(path), AGENT_UID, AGENT_GID)
+            os.chown(path, AGENT_UID, AGENT_GID)
+            os.chmod(path, 0o666)
+        except Exception as e:
+            print("[registry] prepare %s failed: %s" % (path, e), flush=True)
+
+    _ensure_registry_file()
 
     def all_containers():
         return docker_client_or_default().containers.list(all=True)
@@ -765,7 +826,7 @@ def create_app(docker_client=None):
             "managed": is_managed(container),
             "logs": _tail_logs(container, tail=200),
             "state": agent_states.get(container.name, "idle"),
-            "registered": tools_hub.get_tool_file(tools_hub.derive_tool_name(container.name)) is not None,
+            "registered": _tool_record_for_container(container.name) is not None,
             "ports": _read_port_config(container.name),
         }
         return item
@@ -1109,6 +1170,42 @@ def create_app(docker_client=None):
         except docker.errors.NotFound:
             return jsonify({"error": "Container not found"}), 404
 
+    def _dispatch_to_agent(container, container_name, agent_type, message):
+        """把一条指令交给容器内的 agent 执行，返回 (ok, error)。
+
+        claude/ollama 走容器内 run_claude.js（= 容器内置接口），openclaw 走 openclaw agent。
+        供「发送」按钮与「注册」按钮共用。
+        """
+        if agent_type in ("claude", "ollama"):
+            agent_states[container_name] = "thinking"
+            msg_b64 = base64.b64encode(message.encode("utf-8")).decode("ascii")
+            script = (f"CLAUDE_PERMISSION_MODE=bypassPermissions CLAUDE_MSG='{msg_b64}' "
+                      "node /home/agent/.claude/workspace/project/run_claude.js")
+            try:
+                container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
+                container.exec_run(["/bin/sh", "-lc", "nohup /tmp/send_msg.sh >> /home/agent/.claude/workspace/project/logs/agent_tui.log 2>&1 &"],
+                                   user=AGENT_RUNTIME_USER, detach=True)
+            except Exception as e:
+                return False, str(e)
+            return True, None
+
+        # openclaw：先把 gateway 的 bind/mode 去掉再用 openclaw agent 发消息
+        log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
+        escaped_msg = message.replace("'", "'\"'\"'")
+        msg_b64 = base64.b64encode(message.encode("utf-8")).decode("ascii")
+        script = (f"node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; "
+                  "const j=JSON.parse(fs.readFileSync(p,\"utf8\")); delete j.gateway.bind; delete j.gateway.mode; "
+                  "fs.writeFileSync(p,JSON.stringify(j));'; "
+                  f"echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1")
+        try:
+            ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+            container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
+            container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
+            container.exec_run(["/bin/sh", "-lc", f"nohup /tmp/send_msg.sh >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
+        except Exception as e:
+            return False, str(e)
+        return True, None
+
     @app.post("/api/agents/<path:name>/send-message")
     def api_send_message(name):
         body = request.get_json(silent=True) or {}
@@ -1117,35 +1214,12 @@ def create_app(docker_client=None):
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
-            
-            if agent_type in ("claude", "ollama"):
-                agent_states[name] = "thinking"  # 标记思考中（send-message）
-                default_msg = INITIAL_MESSAGE.format(agent="claude")
-                msg_to_send = message or default_msg
-                msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"CLAUDE_PERMISSION_MODE=bypassPermissions CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js"
-                try:
-                    container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
-                    container.exec_run(["/bin/sh", "-lc", f"nohup /tmp/send_msg.sh >> /home/agent/.claude/workspace/project/logs/agent_tui.log 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
-                except Exception as e:
-                    return jsonify({"error": str(e)}), 500
-                return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
-            else:
-                msg_file = "/tmp/send_msg.sh"
-                default_msg = INITIAL_MESSAGE.format(agent="openclaw")
-                log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
-                msg_to_send = message or default_msg
-                escaped_msg = msg_to_send.replace("'", "'\"'\"'")
-                msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
-                script = f"node -e 'const fs=require(\"fs\"); const p=process.env.HOME+\"/.openclaw/openclaw.json\"; const j=JSON.parse(fs.readFileSync(p,\"utf8\")); delete j.gateway.bind; delete j.gateway.mode; fs.writeFileSync(p,JSON.stringify(j));'; echo '{msg_b64}' | base64 -d | openclaw agent --session-id main -m \"$(cat)\" >> '{log_path}' 2>&1"
-                try:
-                    ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-                    container.exec_run(["/bin/sh", "-c", f"echo '[{ts}] $ {escaped_msg}' >> '{log_path}'"], user=AGENT_RUNTIME_USER)
-                    container.exec_run(["/bin/sh", "-c", f"echo '{script}' > {msg_file} && chmod +x {msg_file}"], user=AGENT_RUNTIME_USER)
-                    container.exec_run(["/bin/sh", "-lc", f"nohup {msg_file} >> '{log_path}' 2>&1 &"], user=AGENT_RUNTIME_USER, detach=True)
-                except Exception as e:
-                    return jsonify({"error": str(e)}), 500
-                return jsonify({"ok": True, "container_name": name, "message": message, "agent_type": agent_type, "sent_at": now_iso()})
+            default_msg = INITIAL_MESSAGE.format(agent="claude" if agent_type in ("claude", "ollama") else "openclaw")
+            ok, err = _dispatch_to_agent(container, name, agent_type, message or default_msg)
+            if not ok:
+                return jsonify({"error": err}), 500
+            return jsonify({"ok": True, "container_name": name, "message": message,
+                            "agent_type": agent_type, "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
@@ -1842,9 +1916,30 @@ def create_app(docker_client=None):
                 errors[c.name] = str(e)
         return jsonify({"ok": True, "recreated": recreated, "errors": errors, "recreated_at": now_iso()})
 
+    def _tool_record_for_container(container_name):
+        """面板「已注册」判定：先按派生名查，再按记录里的 container_name 兜底匹配。
+
+        注册记录现在由容器自己提交（见 api_register_agent），容器可能用了别的 name，
+        所以不能只看派生名。
+        """
+        record = tools_hub.get_tool_file(tools_hub.derive_tool_name(container_name))
+        if record:
+            return record
+        for tool in tools_hub.list_tools_file():
+            if tool.get("container_name") == container_name:
+                return tool
+        return None
+
     @app.post("/api/agents/<path:name>/register")
     def api_register_agent(name):
-        """把该容器的调用指南（doc_md）写入 19081 Hub 的 docs（注册）。"""
+        """注册 = 给容器下达指令，让它按 Hub 规范把自己的接口文档提交到 19081 Hub。
+
+        注意：这里**不再**由 control 拼一份固定记录写注册表。注册内容（功能性 API 清单 +
+        /ask/claude 接口 + doc_md）必须由容器自己按真实情况生成并 POST 到 Hub，
+        这样其他容器卡片才能照着文档真正调用它。control 只负责下指令与显示「已注册」状态。
+
+        传 ?dry_run=1 只返回将要下达的指令、不真正下发（便于测试与排查）。
+        """
         try:
             container = _require_managed(name)
         except PermissionError as e:
@@ -1854,18 +1949,31 @@ def create_app(docker_client=None):
         labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
         agent_type = labels.get("hermit.agent_type", "")
         port = container_host_port(container)
-        body = request.get_json(silent=True) or {}
-        description = (body.get("description") or "").strip()
-        record = tools_hub.build_tool_record(name, port, agent_type, description=description)
-        tools_hub.register_tool_file(record)
-        return jsonify({"ok": True, "registered": record})
+        tool_name = tools_hub.derive_tool_name(name)
+        message = build_register_message(name, port, tool_name, agent_type)
+
+        if (request.args.get("dry_run") or "").lower() in ("1", "true", "yes"):
+            return jsonify({
+                "ok": True, "dry_run": True, "container_name": name, "tool_name": tool_name,
+                "host_port": port, "hub_api": HUB_API_URL, "message": message,
+            })
+
+        ok, err = _dispatch_to_agent(container, name, agent_type, message)
+        if not ok:
+            return jsonify({"error": err or "dispatch failed"}), 500
+        return jsonify({
+            "ok": True, "dispatched": True, "container_name": name, "tool_name": tool_name,
+            "host_port": port, "hub_api": HUB_API_URL, "sent_at": now_iso(),
+        })
 
     @app.delete("/api/agents/<path:name>/register")
     def api_unregister_agent(name):
-        """取消注册：把该容器的调用指南从 19081 Hub docs 中移除。"""
-        tool_name = tools_hub.derive_tool_name(name)
-        removed = tools_hub.unregister_tool_file(tool_name)
-        return jsonify({"ok": True, "removed": bool(removed)})
+        """取消注册：把该容器在 19081 Hub 上的记录移除（按记录里的真实 name 删）。"""
+        record = _tool_record_for_container(name)
+        removed = None
+        if record and record.get("name"):
+            removed = tools_hub.unregister_tool_file(record["name"])
+        return jsonify({"ok": True, "removed": bool(removed), "tool_name": (record or {}).get("name", "")})
 
     def _port_config_path(container_name):
         """容器工作目录下的 config/port.txt 路径。"""
@@ -2589,21 +2697,38 @@ def create_app(docker_client=None):
         
         const registerBtn = div.querySelector('.register-btn');
         if (registerBtn) {{
-          registerBtn.onclick = async () => {{
+          registerBtn.title = "点击：向该容器下达注册指令（容器自己按 Hub 规范把接口文档提交到 19081 Hub）；Alt+点击：注销";
+          registerBtn.onclick = async (e) => {{
             const wasRegistered = registerBtn.dataset.registered === '1';
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/register`;
-            const r = await fetch(url, {{ method: wasRegistered ? "DELETE" : "POST" }});
-            if (!r.ok) {{
+
+            // Alt+点击 = 注销（把 Hub 上该卡片的记录删掉）
+            if (wasRegistered && e.altKey) {{
+              if (!confirm(`注销 "${{item.container_name}}" 在 19081 Hub 上的注册记录？`)) return;
+              const r = await fetch(url, {{ method: "DELETE" }});
               const d = await r.json();
+              if (!r.ok) {{
+                logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+                return;
+              }}
+              registerBtn.dataset.registered = '0';
+              registerBtn.textContent = '注册';
+              logBox.textContent += `\n[已注销] Hub 上的记录已移除（tool_name=${{d.tool_name || '-'}}）\n`;
+              return;
+            }}
+
+            if (wasRegistered && !confirm(`"${{item.container_name}}" 已注册，重新下达指令让容器更新注册信息？`)) return;
+
+            // 注册 = 给容器下达指令，由容器自己按 Hub 规范生成并提交注册信息
+            const r = await fetch(url, {{ method: "POST" }});
+            const d = await r.json();
+            if (!r.ok) {{
               logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
               return;
             }}
-            const nowRegistered = !wasRegistered;
-            registerBtn.textContent = nowRegistered ? '已注册' : '注册';
-            registerBtn.dataset.registered = nowRegistered ? '1' : '0';
-            logBox.textContent += nowRegistered
-              ? `\n[已注册] 调用指南已写入 19081 Hub docs\n`
-              : `\n[已取消注册]\n`;
+            logBox.textContent += `\n[已下达注册指令] 容器正在按 Hub 规范整理并提交接口文档`
+              + `（tool_name=${{d.tool_name}}, port=${{d.host_port}}）`
+              + `\n  Hub 接口：${{d.hub_api}}\n  完成后本卡片会显示「已注册」\n`;
           }};
         }}
 
@@ -2807,6 +2932,15 @@ def create_app(docker_client=None):
               card.classList.add("blink-card");
             }} else {{
               card.classList.remove("blink-card");
+            }}
+            // 注册状态由容器自己异步提交到 Hub → 轮询里同步按钮（否则按钮状态会滞后）
+            const regBtn = card.querySelector('.register-btn');
+            if (regBtn) {{
+              const want = item.registered ? '1' : '0';
+              if (regBtn.dataset.registered !== want) {{
+                regBtn.dataset.registered = want;
+                regBtn.textContent = item.registered ? '已注册' : '注册';
+              }}
             }}
             if (!window.cardStates || !window.cardStates[item.container_name]) {{
                const logBox = card.querySelector('pre');

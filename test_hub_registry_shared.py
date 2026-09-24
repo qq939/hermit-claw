@@ -112,6 +112,20 @@ def run_static():
           "_host_roots_from_self_mounts" in app and 'mounts.get("/config")' in app)
     check("registry default path unchanged", '"/config/tools_registry.json"' in reg)
 
+    # 注册语义：control 只下指令，不代写固定记录
+    register_body = app.split("def api_register_agent")[1].split("@app.delete")[0]
+    check("register dispatches instruction (no fixed record)",
+          "register_tool_file" not in register_body and "_dispatch_to_agent" in register_body)
+    check("register message built from template",
+          "build_register_message" in app and "REGISTER_MESSAGE" in app)
+    check("register instruction mentions hub api + /ask/claude + doc_md",
+          "19081/api/tools" in app and "/ask/claude" in app and "doc_md" in app)
+    check("register supports dry_run", 'dry_run' in register_body)
+    check("unregister still removes by real name",
+          "unregister_tool_file(record[\"name\"])" in app)
+    check("registered flag matches by container_name too",
+          "_tool_record_for_container" in app and 'tool.get("container_name") == container_name' in app)
+
 
 # ------------------------------------------------------------------ 线上
 def run_live():
@@ -174,23 +188,50 @@ def run_live():
         skip("live hub /api/tools", "Hub 不可达: %s" % e)
         return
 
-    # 闭环：注册 → Hub 可见 → 注销 → 消失
-    tool_name = "test"   # derive_tool_name("19088-test")
+    # 注册按钮语义：dry_run 只回指令，不写注册表
+    before = open(REGISTRY_HOST, "r", encoding="utf-8").read()
     try:
-        http_json("%s/api/agents/%s/register" % (CONTROL, urllib.parse.quote(E2E_CARD)), method="POST", payload={})
-        after = set(t.get("name") for t in (http_json(HUB + "/api/tools").get("items") or []))
-        check("register via panel is visible in hub", tool_name in after)
+        dry = http_json("%s/api/agents/%s/register?dry_run=1" % (CONTROL, urllib.parse.quote(E2E_CARD)),
+                        method="POST", payload={})
+        msg = dry.get("message") or ""
+        check("dry_run returns instruction", dry.get("dry_run") is True and len(msg) > 100)
+        check("instruction carries hub api url", "19081/api/tools" in msg)
+        check("instruction carries port + tool name",
+              str(dry.get("host_port")) in msg and (dry.get("tool_name") or "") in msg)
+        check("instruction demands /ask/claude + doc_md",
+              "/ask/claude" in msg and "doc_md" in msg)
+        after_dry = open(REGISTRY_HOST, "r", encoding="utf-8").read()
+        check("dry_run does not touch the registry", after_dry == before)
     except Exception as e:
-        check("register via panel is visible in hub", False)
+        check("dry_run returns instruction", False)
+        print("   -> %s" % e, flush=True)
+
+    # 模拟"容器自己注册"：直接 POST 完整记录到 Hub → 面板应显示已注册（按 container_name 匹配）
+    tool_name = "test"   # derive_tool_name("19088-test")
+    record = {
+        "name": tool_name, "display_name": E2E_CARD, "description": "自注册闭环测试",
+        "port": 19088, "container_name": E2E_CARD, "agent_type": "claude",
+        "doc_md": "# %s\n\n## API\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| GET | /ask/claude | 问答 |\n" % E2E_CARD,
+    }
+    try:
+        http_json(HUB + "/api/tools", method="POST", payload=record)
+        after = set(t.get("name") for t in (http_json(HUB + "/api/tools").get("items") or []))
+        check("container-side registration is visible in hub", tool_name in after)
+
+        cards = http_json(CONTROL + "/api/agents").get("items") or []
+        flagged = [c for c in cards if c.get("container_name") == E2E_CARD and c.get("registered")]
+        check("panel flags the card as registered (container_name match)", bool(flagged))
+    except Exception as e:
+        check("container-side registration is visible in hub", False)
         print("   -> %s" % e, flush=True)
     finally:
         try:
             http_json("%s/api/agents/%s/register" % (CONTROL, urllib.parse.quote(E2E_CARD)), method="DELETE")
             back = set(t.get("name") for t in (http_json(HUB + "/api/tools").get("items") or []))
-            check("unregister removes it from hub", tool_name not in back)
+            check("unregister (DELETE) removes it from hub", tool_name not in back)
             check("hub set restored to host registry", back == host_items)
         except Exception as e:
-            check("unregister removes it from hub", False)
+            check("unregister (DELETE) removes it from hub", False)
             print("   -> %s" % e, flush=True)
 
 

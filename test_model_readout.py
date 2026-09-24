@@ -51,6 +51,8 @@ EXPECT_PROFILES = {
     "deepseek": ("deepseek-v4-flash", "https://api.deepseek.com/anthropic"),
     "deepseek-flash": ("deepseek-flash", "https://api.deepseek.com/anthropic"),
     "localqwen": ("qwen3.8-27b", "http://host.docker.internal:8000"),
+    # webqwen：远端（dimond.top:21234）的 web 版千问，模型名带 publisher 前缀
+    "webqwen": ("qwen/qwen3.8-27b", "http://dimond.top:21234"),
 }
 
 failures = []
@@ -238,7 +240,10 @@ def run_endpoint_dry_run():
     check("in-sync card has no stale-env warning",
           not any("不一致：实际生效" in w for w in legacy.get("warnings") or []))
     clean = endpoint("localqwen-in-sync")
-    check("in-sync localqwen card is warning-free", not (clean.get("warnings") or []))
+    # 不要求"完全无告警"：当前默认 profile 可能不是 localqwen（会给出"落后于当前默认配置"的提示），
+    # 这里只要求没有"env 与文件不一致"那类真正的问题告警。
+    check("in-sync localqwen card has no stale-env warning",
+          not any("实际生效" in w for w in clean.get("warnings") or []))
 
     # settings.json 与 config.json 端点打架时必须报出来
     containers["mismatch"] = FakeContainer(

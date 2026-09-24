@@ -9,6 +9,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 显式导出 PWD：compose 里的 ${PWD} 取的是这个环境变量，
+# 从别的目录调用本脚本若不设置，会把宿主机路径烤错，导致之后新建/重建的
+# 卡片挂到错误甚至空的目录上（实测踩过）。
+export PWD="$SCRIPT_DIR"
+
 # 构建 agent 模板镜像（带 profiles: ["templates"]，默认 compose up 不会构建，需显式构建）
 docker compose build agent-image-claude agent-image-openclaw agent-image-ollama
 
