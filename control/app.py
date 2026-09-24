@@ -113,6 +113,28 @@ def build_register_message(container_name, host_port, tool_name, agent_type):
                                    hub_api=HUB_API_URL)
 
 
+# GIT_INIT_MESSAGE: 面板「非Git项目」点击后下达的指令。
+# 容器里普遍没有 git 身份配置（user.email 为空），直接 commit 会失败，所以指令里带上本地身份设置。
+GIT_INIT_MESSAGE = """【初始化 Git 仓库】项目目录 /home/agent/.claude/workspace/project 目前不是 git 仓库，
+所以 Control 面板的版本下拉框显示「非Git项目」。请在该目录一次性完成初始化（做完即止）：
+
+1) cd /home/agent/.claude/workspace/project
+2) 设置**本地**身份（不要 --global；容器里默认没有 git 身份，不设会 commit 失败）：
+   git config user.name "hermit-agent" && git config user.email "agent@hermit.local"
+3) git init
+4) 确认 .gitignore 至少包含：logs/  node_modules/  .DS_Store  __pycache__/  *.log  .env  uploads/  dist/  build/
+5) git add -A && git commit -m "Initial commit"
+6) 在 logs/commit.txt 追加一行：<短commit_id> Initial commit
+7) 交付证据：贴出 `git log --oneline -1` 与 `git status --short` 的输出
+
+规范见 /agent-config/skills/hermit-git/SKILL.md。只做仓库初始化，不要改动项目功能代码。"""
+
+
+def build_git_init_message(container_name):
+    """渲染「git init」指令。"""
+    return GIT_INIT_MESSAGE
+
+
 # AGENT_UID / AGENT_GID: 容器内 agent 用户的 uid/gid（见 agents/claude/Dockerfile 的 useradd -u 501 -g 20）。
 # 注册表要被卡片里的 Hub 进程（以 agent 身份运行）写入，所以文件属主必须是它，否则 POST /api/tools 会 500。
 AGENT_UID = 501
@@ -1975,6 +1997,33 @@ def create_app(docker_client=None):
             removed = tools_hub.unregister_tool_file(record["name"])
         return jsonify({"ok": True, "removed": bool(removed), "tool_name": (record or {}).get("name", "")})
 
+    @app.post("/api/agents/<path:name>/git-init")
+    def api_git_init(name):
+        """git init = 给容器下达指令，让它在项目目录建 git 仓库并做首次提交。
+
+        面板版本下拉框显示「非Git项目」就是这张卡片从没建过仓库（多数卡片都没遵循规范），
+        点一下就把这条初始化指令交给容器里的 agent 执行；control 不代跑 git 命令。
+
+        传 ?dry_run=1 只返回将要下达的指令、不真正下发。
+        """
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type", "")
+        message = build_git_init_message(name)
+
+        if (request.args.get("dry_run") or "").lower() in ("1", "true", "yes"):
+            return jsonify({"ok": True, "dry_run": True, "container_name": name, "message": message})
+
+        ok, err = _dispatch_to_agent(container, name, agent_type, message)
+        if not ok:
+            return jsonify({"error": err or "dispatch failed"}), 500
+        return jsonify({"ok": True, "dispatched": True, "container_name": name, "sent_at": now_iso()})
+
     def _port_config_path(container_name):
         """容器工作目录下的 config/port.txt 路径。"""
         host_ws = app.config["HOST_WORKSPACES_ROOT"]
@@ -2757,14 +2806,34 @@ def create_app(docker_client=None):
         const gitSelect = div.querySelector('.git-select');
         const gitTools = div.querySelector('.git-tools');
         const gitModeSelect = div.querySelector('.git-mode-select');
+        let gitInitSent = false;
+        // 非 Git 项目 → 给容器下达 git init 指令（由容器自己建仓并首次提交）
+        const gitInit = async () => {{
+          if (gitInitSent) {{
+            logBox.textContent += `\n[git init 指令已下达] 等容器做完，重新点标题刷新下拉框即可看到提交历史\n`;
+            return;
+          }}
+          if (!confirm(`"${{item.container_name}}" 还不是 Git 仓库，向容器下达 git init 指令？`)) return;
+          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-init`, {{ method: "POST" }});
+          const d = await r.json();
+          if (!r.ok) {{
+            logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+            return;
+          }}
+          gitInitSent = true;
+          logBox.textContent += `\n[已下达 git init 指令] 容器会在项目目录建仓 + 首次提交；完成后重新点标题刷新下拉框\n`;
+        }};
         const loadGitCommits = async () => {{
           try {{
             const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-commits`);
             const d = await r.json();
             if (d.error) {{
-              gitSelect.innerHTML = '<option value="">非Git项目</option>';
+              // 不是 git 仓库：这一项本身就是可点的操作入口（点它 = 下达 git init 指令）
+              gitSelect.innerHTML = '<option value="__GIT_INIT__">非Git项目 · 点击执行 git init</option>';
+              gitSelect.dataset.gitInit = '1';
               return;
             }}
+            delete gitSelect.dataset.gitInit;
             gitSelect.innerHTML = '<option value="">选择版本...</option>';
             (d.commits || []).forEach(c => {{
               const opt = document.createElement("option");
@@ -2786,7 +2855,12 @@ def create_app(docker_client=None):
           }}
         }};
         
+        // 「非Git项目」支持点击：单击 / 选择该项都触发 git init 指令
+        gitSelect.onclick = () => {{
+          if (gitSelect.dataset.gitInit === '1') gitInit();
+        }};
         gitSelect.onchange = async () => {{
+          if (gitSelect.dataset.gitInit === '1') {{ gitInit(); return; }}
           const hash = gitSelect.value;
           if (!hash) return;
           gitTools.style.display = "none";
