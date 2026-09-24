@@ -36,6 +36,13 @@ from flask import Flask, jsonify, make_response, request, send_file
 from flask_sock import Sock
 from tools.hub import registry as tools_hub
 
+# 注册表共享路径：control 面板与 19081 Hub 卡片必须读写同一份 tools_registry.json。
+#   - control 容器：./config 挂到 /config → 用 /config/registry/tools_registry.json
+#   - agent 卡片：宿主机 config/registry 挂到卡片的 /config → 用默认 /config/tools_registry.json
+# 两者指向宿主机同一个文件 config/registry/tools_registry.json（建卡片时挂载，见 _registry_volume）。
+tools_hub.TOOLS_REGISTRY_PATH = (os.environ.get("TOOLS_REGISTRY_PATH")
+                                 or "/config/registry/tools_registry.json")
+
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
 START_HOST_PORT = 19081
@@ -162,6 +169,39 @@ def create_app(docker_client=None):
         if configured is not None:
             return configured
         return docker.from_env()
+
+    def _host_roots_from_self_mounts():
+        """用 control 自己容器的真实挂载反推宿主机根目录。
+
+        为什么要这样：compose 里写的是 HOST_CONFIG_ROOT=${PWD}/config，而 ${PWD} 取的是
+        「执行 compose 那个 shell 的环境变量」。只要从别的目录跑 compose（例如在 DSH checkout
+        里 docker compose -f .../hermitclaw/docker-compose.yml up），HOST_CONFIG_ROOT 就会被烤成
+        那个目录，之后新建/重建的卡片会把 /agent-config、/config、workspace 全挂到错误（甚至是空）
+        的目录上——实测踩过：Hub 卡片挂到空目录后整个 web 服务起不来，注册表也读不到。
+
+        这里以「/config、/workspaces 这两个挂载的宿主机 source」为准（compose 的相对路径
+        ./config、./workspaces 是按 compose 文件所在目录解析的，跟 PWD 无关，最可靠）。
+        """
+        try:
+            me = docker_client_or_default().containers.get(os.environ.get("HOSTNAME") or "")
+            mounts = {}
+            for m in ((getattr(me, "attrs", {}) or {}).get("Mounts") or []):
+                dest, src = m.get("Destination"), m.get("Source")
+                if dest and src:
+                    mounts[dest] = src.replace("\\", "/")
+            cfg, ws = mounts.get("/config"), mounts.get("/workspaces")
+            if cfg and ws:
+                return cfg, ws
+        except Exception:
+            pass
+        return None
+
+    _self_roots = _host_roots_from_self_mounts()
+    if _self_roots:
+        app.config["HOST_CONFIG_ROOT"], app.config["HOST_WORKSPACES_ROOT"] = _self_roots
+        app.config["HOST_LOGS_ROOT"] = os.path.join(os.path.dirname(_self_roots[1]), "logs")
+        app.config["HOST_TOOLS_ROOT"] = (os.environ.get(HOST_TOOLS_ROOT_ENV)
+                                        or os.path.join(os.path.dirname(_self_roots[1]), "tools"))
 
     def all_containers():
         return docker_client_or_default().containers.list(all=True)
@@ -365,6 +405,16 @@ def create_app(docker_client=None):
             pass
         _d("copy", "chown done")
 
+    def _registry_volume():
+        """注册表共享卷：宿主机 config/registry → 容器内 /config（rw）。
+
+        这样 Hub 卡片用默认路径 /config/tools_registry.json 就能读到 control 面板
+        「注册」写入的记录（修掉两边各写一份、Hub 页面看不到注册的问题）。
+        """
+        path = os.path.join(app.config["HOST_CONFIG_ROOT"], "registry")
+        os.makedirs(path, exist_ok=True)
+        return {path: {"bind": "/config", "mode": "rw"}}
+
     def create_agent(agent_type, custom_name, body=None):
         _d("create", f"ENTRY: type={agent_type} name={custom_name}")
         if agent_type not in AGENT_SPECS:
@@ -402,6 +452,7 @@ def create_app(docker_client=None):
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
             f"{host_config_root}/rules": {"bind": "/home/agent/.claude/workspace/config-rules", "mode": "ro"},
             f"{host_tools_root}": {"bind": project_path_for_agent_type(agent_type) + "/tools", "mode": "ro"},
+            **_registry_volume(),
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
 
@@ -557,6 +608,7 @@ def create_app(docker_client=None):
             f"{host_logs_root}/{container_name}": {"bind": log_bind, "mode": "rw"},
             f"{host_config_root}/rules": {"bind": "/home/agent/.claude/workspace/config-rules", "mode": "ro"},
             f"{host_tools_root}": {"bind": project_path_for_agent_type(agent_type) + "/tools", "mode": "ro"},
+            **_registry_volume(),
         }
         log_config = LogConfig(type=LogConfig.types.JSON, config={"max-size": "500m", "max-file": "2"})
         container.remove(force=True)

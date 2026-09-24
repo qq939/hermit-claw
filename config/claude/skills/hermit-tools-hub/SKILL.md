@@ -74,5 +74,15 @@ github 等）都可以注册到 Hub，把「自己是谁、提供哪些接口、
 
 ## 15.5 持久化
 
-注册表持久化到 `config/tools_registry.json`（容器内挂载到 `/config`），重启后保留。
-同名工具重复注册会覆盖旧记录。
+注册表持久化到**宿主机** `config/registry/tools_registry.json`；容器内统一看到的是
+`/config/tools_registry.json`：
+
+- control 面板容器：`./config` 挂到 `/config`，写的就是上面那个文件；
+- agent 卡片：宿主机 `config/registry` 挂到卡片的 `/config`（建卡片时由 control 挂上）。
+
+因此面板卡片上的「注册 / 已注册」与 19081 Hub 首页读的是**同一份**注册表，注册后刷新
+Hub 页面即可看到。同名工具重复注册会覆盖旧记录。
+
+> 排查提示：若 Hub 首页看不到已注册工具，先确认卡片里有 `/config/tools_registry.json`
+> （`docker exec <卡片> ls -l /config`），以及 control 里 `HOST_CONFIG_ROOT` 是否指向本仓库
+> 根目录下的 `config/`（compose 的 `${PWD}` 若从别的目录执行会取错路径）。

@@ -14,7 +14,12 @@ import re
 import threading
 from datetime import datetime, timezone
 
-# TOOLS_REGISTRY_PATH: 注册表 JSON 持久化路径（容器内挂载 /config，宿主机 config/ 目录）
+# TOOLS_REGISTRY_PATH: 注册表 JSON 持久化路径。
+#   容器内统一为 /config/tools_registry.json：
+#     - control 容器：./config 挂到 /config，故实际是宿主机 config/registry/tools_registry.json
+#       （见 control/app.py 里对 tools_hub.TOOLS_REGISTRY_PATH 的设置）
+#     - agent 卡片：宿主机 config/registry 挂到卡片的 /config（见 control/app.py _registry_volume）
+#   两边必须指向同一个文件，否则面板「注册」后 Hub 页面看不到（曾因卡片没挂 /config 而分叉）。
 # 使用位置：load_registry / save_registry / *_file 系列函数的默认 path 参数
 TOOLS_REGISTRY_PATH = os.environ.get("TOOLS_REGISTRY_PATH", "/config/tools_registry.json")
 # _REGISTRY_LOCK: 注册表读写锁，防止多线程并发写坏 JSON
