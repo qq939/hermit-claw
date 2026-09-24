@@ -2315,7 +2315,6 @@ def create_app(docker_client=None):
             <button data-action="download">下载日志</button>
             <button data-action="recreate">重建</button>
             <button data-action="cleanup-context">清理上下文</button>
-            <button data-action="init">发送初始消息</button>
             <button class="register-btn" data-action="register" data-registered="${{item.registered ? '1' : '0'}}">${{item.registered ? '已注册' : '注册'}}</button>
             <button class="port-btn" data-action="port" data-ports="${{(item.ports || []).join('\\n')}}">端口</button>
           </div>
@@ -2390,11 +2389,11 @@ def create_app(docker_client=None):
             logBox.style.display = "block";
           }}
         }};
-        div.querySelector('button[data-action="refresh"]').onclick = async () => {{
-          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs?tail=200`, {{ cache: "no-store" }});
-          const d = await r.json();
-          logBox.textContent = d.logs || d.error || "";
-          logBox.scrollTop = logBox.scrollHeight;
+        div.querySelector('button[data-action="refresh"]').onclick = () => {{
+          // 刷新日志 → 直接刷新整个页面，并在刷新后自动展开本卡片（用 URL hash 记名）
+          const target = "#card=" + encodeURIComponent(item.container_name);
+          if (location.hash !== target) location.hash = target;
+          location.reload();
         }};
         div.querySelector('button[data-action="download"]').onclick = () => {{
           window.open(`/api/agents/${{encodeURIComponent(item.container_name)}}/logs/download?tail=500`, "_blank");
@@ -2409,19 +2408,6 @@ def create_app(docker_client=None):
           }}
           logBox.textContent += `\\n(recreated) ${{d.container_name}}\\n`;
           await refreshCards();
-        }};
-        div.querySelector('button[data-action="init"]').onclick = async () => {{
-          const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/send-message`, {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ message: "" }}),
-          }});
-          if (!r.ok) {{
-            const d = await r.json();
-            logBox.textContent += `\\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;
-            return;
-          }}
-          logBox.textContent += `\n(已发送初始消息)\n`;
         }};
         div.querySelector('button[data-action="switch-model"]').onclick = async (e) => {{
           e.stopPropagation();
@@ -2838,6 +2824,26 @@ def create_app(docker_client=None):
         }}
         
         let tabIndex = 0;
+        // 「刷新日志」按钮用 #card=<name> 记名：刷新后自动展开（并滚动到）那张卡片
+        (function expandCardFromHash() {{
+          const m = /(?:^|[#&])card=([^&]+)/.exec(location.hash || "");
+          if (!m) return;
+          let want = "";
+          try {{ want = decodeURIComponent(m[1]); }} catch (err) {{ want = m[1]; }}
+          const target = document.querySelector(`.card[data-name="${{want}}"]`);
+          if (!target) return;
+          document.querySelectorAll('.card[data-name]').forEach((c) => {{
+            if (c !== target) {{
+              c.classList.add('collapsed');
+              const b = c.querySelector('.collapse-btn');
+              if (b) b.textContent = '▶';
+            }}
+          }});
+          handleCardExpand(target);
+          const msgInput = target.querySelector('.cmd-input');
+          if (msgInput) msgInput.focus();
+          target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+        }})();
         document.addEventListener('keydown', (e) => {{
           if (e.key === 'Tab') {{
             e.preventDefault();
