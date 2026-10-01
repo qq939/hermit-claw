@@ -1,4 +1,4 @@
-INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。另外：project/claudeagent.md 是你这张卡片自己的注入文件（写本卡片的核心目标/职责/对外接口），请把里面残留的 TODO 换成真实内容。"
+INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。"
 # FRPC_PATH / FRPC_ALT_PATH: frpc 配置目录（容器内路径，由 docker-compose.yml 把宿主机 ../frpc 与 ../frp 挂载进来）。
 # 兼容 frp 与 frpc 两种目录：宿主机 frpc.ini 可能位于 frp 或 frpc 目录，优先使用实际存在的那个。
 # 使用位置：resolve_frpc_config_path()（探测 frpc.ini 实际位置，约 L202）；add_frpc_rule()（写入端口映射规则）。
@@ -140,32 +140,11 @@ def build_git_init_message(container_name):
 AGENT_UID = 501
 AGENT_GID = 20
 
-# CLAUDEAGENT_TEMPLATE: 每张卡片自己的注入文件（project/claudeagent.md）模板。
+# CLAUDEAGENT_FILE: 每张卡片自己的注入文件（project/claudeagent.md）。
 # 机制：CLAUDE.md 是平台级注入（所有卡片共享，平台维护）；claudeagent.md 是**这一张卡片自己的**
-# 注入（核心目标 / 职责 / 对外接口），由卡片 agent 维护、control 建卡片时生成模板，
-# 并由 run_claude.js 注入到每次 Claude 调用前面（因此 /ask/claude 也自动带上它）。
-CLAUDEAGENT_TEMPLATE = """# {container} · 核心目标
-
-> 这是 **claudeagent.md** —— **本卡片自己的**注入文件（每张卡片一份）。它会被 run_claude.js
-> 注入到每次 Claude 调用，所以别的容器卡片通过 /ask/claude 调你时，也带着这份目标。
-> 平台级约定见同目录 `CLAUDE.md` / `systemreadme.md`；两者冲突时以平台约定为准。
-
-## 我是谁
-- 容器：`{container}` ／ 类型：`{agent_type}` ／ 宿主机端口：`{port}`
-- 对外地址：http://dimond.top:{port}
-- 对外接口：`/ask/claude`（问答）、`/health`；其余功能性接口见 19081 Hub 上的注册记录
-
-## 核心目标（务必写清，1-3 条）
-- TODO：用一两句话写清本卡片存在的目的（例如「提供邮件收发与回复追踪服务」）。
-
-## 职责边界
-- 负责：TODO
-- 不负责：TODO
-
-## 交付与维护
-- 交付：代码 + README/SKILL + logs 记录，一次做完，不留半成品。
-- 核心目标或对外接口有变化时更新本文件；每次对话后 `git commit`（见 skill `hermit-git`）。
-"""
+# 注入（核心目标 / 职责 / 对外接口），由 run_claude.js 注入到每次 Claude 调用前面（含 /ask/claude）。
+# 默认**空文件**：内容由用户通过面板卡片的「任务」按钮（或 GET/PUT API）填写；空文件不做注入。
+CLAUDEAGENT_FILENAME = "claudeagent.md"
 
 
 # agent_states: 容器卡片状态字典，key=container_name, value="idle"|"thinking"|"done"
@@ -534,22 +513,19 @@ def create_app(docker_client=None):
         HOST_WORKSPACES_ROOT 是宿主机路径，只适合传给 Docker 当 bind source（create/recreate 用）。
         混用会把文件写到 control 自己文件系统里一个叫 "C:" 的目录下——踩过。
         """
-        return os.path.join(app.config["WORKSPACES_ROOT"], container_name, "claudeagent.md")
+        return os.path.join(app.config["WORKSPACES_ROOT"], container_name, CLAUDEAGENT_FILENAME)
 
-    def ensure_agent_profile(container_name, host_port, agent_type):
-        """确保卡片有自己的注入文件；不存在或是空文件才写模板，绝不覆盖已有内容。
+    def ensure_agent_profile(container_name, host_port=None, agent_type=None):
+        """确保卡片有 claudeagent.md —— **默认空文件**（不写模板、绝不覆盖已有内容）。
 
-        与平台级 CLAUDE.md（所有卡片共享）区分：claudeagent.md 是这张卡片自己的核心目标，
-        由卡片 agent 维护，run_claude.js 每次调用都会注入它（含 /ask/claude）。
+        内容由用户通过面板「任务」按钮或 GET/PUT API 填写；空文件 run_claude.js 不注入。
         """
         path = _agent_profile_path(container_name)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            if not os.path.exists(path) or os.path.getsize(path) == 0:
+            if not os.path.exists(path):
                 with open(path, "w", encoding="utf-8") as f:
-                    f.write(CLAUDEAGENT_TEMPLATE.format(container=container_name,
-                                                        port=host_port,
-                                                        agent_type=agent_type or "claude"))
+                    f.write("")
             try:
                 os.chown(path, AGENT_UID, AGENT_GID)
                 os.chmod(path, 0o664)
@@ -2114,8 +2090,9 @@ def create_app(docker_client=None):
         """写入本卡片自己的注入文件（面板或卡片 agent 更新核心目标）。"""
         body = request.get_json(silent=True) or {}
         content = body.get("content")
-        if not isinstance(content, str) or not content.strip():
-            return jsonify({"error": "content is required"}), 400
+        # 允许保存空内容（默认就是空文件）；只要求类型正确
+        if not isinstance(content, str):
+            return jsonify({"error": "content (string) is required"}), 400
         try:
             _require_managed(name)
         except PermissionError as e:
@@ -2387,6 +2364,27 @@ def create_app(docker_client=None):
         border-bottom: 1px solid rgba(255,255,255,0.08);
       }}
       .profile-popup .model-hint:hover {{ background: none; }}
+      .task-modal {{
+        display: none; position: fixed; inset: 0; z-index: 10000;
+        background: rgba(0,0,0,0.6); align-items: center; justify-content: center;
+      }}
+      .task-dialog {{
+        width: min(860px, 92vw); max-height: 86vh; display: flex; flex-direction: column;
+        background: #1a1a2e; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.7); padding: 12px 14px; gap: 8px;
+      }}
+      .task-head {{ display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }}
+      .task-head #task-title {{ font-size: 13px; font-weight: 600; color: #3AE374; }}
+      .task-status {{ font-size: 11px; color: var(--muted); }}
+      .task-dialog textarea {{
+        flex: 1; min-height: 320px; resize: vertical; font-size: 12px; line-height: 1.5;
+        font-family: Menlo, Monaco, "Courier New", monospace;
+        background: #101024; color: #e6e6e6; border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 6px; padding: 10px;
+      }}
+      .task-actions {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+      .task-actions button {{ padding: 5px 14px; }}
+      .task-hint {{ font-size: 11px; color: var(--muted); }}
       .git-tools {{
         display: none;
         align-items: center;
@@ -2450,6 +2448,20 @@ def create_app(docker_client=None):
     </header>
     <main class="wrap">
       <div id="cards" class="grid"></div>
+      <div id="task-modal" class="task-modal">
+        <div class="task-dialog">
+          <div class="task-head">
+            <span id="task-title">任务 · claudeagent.md</span>
+            <span id="task-status" class="task-status"></span>
+          </div>
+          <textarea id="task-text" spellcheck="false" placeholder="写这张卡片自己的核心目标 / 职责 / 对外接口。保存后 run_claude.js 会把它注入到每次 Claude 调用（含 /ask/claude）；留空则不注入。"></textarea>
+          <div class="task-actions">
+            <button id="task-save">保存</button>
+            <button id="task-close">关闭</button>
+            <span class="task-hint">Ctrl+S 保存 · Esc 关闭 · 编辑后 1.5 秒自动保存</span>
+          </div>
+        </div>
+      </div>
     </main>
     <script>
       const cards = document.getElementById("cards");
@@ -2639,6 +2651,7 @@ def create_app(docker_client=None):
             <button data-action="cleanup-context">清理上下文</button>
             <button class="register-btn" data-action="register" data-registered="${{item.registered ? '1' : '0'}}">${{item.registered ? '已注册' : '注册'}}</button>
             <button class="port-btn" data-action="port" data-ports="${{(item.ports || []).join('\\n')}}">端口</button>
+            <button class="task-btn" data-action="task" title="编辑这张卡片自己的注入文件 claudeagent.md（核心目标），保存后每次 Claude 调用都会带上它">任务</button>
           </div>
           <div class="cmd-bar">
             <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
@@ -2891,6 +2904,15 @@ def create_app(docker_client=None):
             logBox.textContent += `\n[已下达注册指令] 容器正在按 Hub 规范整理并提交接口文档`
               + `（tool_name=${{d.tool_name}}, port=${{d.host_port}}）`
               + `\n  Hub 接口：${{d.hub_api}}\n  完成后本卡片会显示「已注册」\n`;
+          }};
+        }}
+
+        // 「任务」按钮：打开 claudeagent.md 实时编辑器（本卡片自己的注入文件）
+        const taskBtn = div.querySelector('.task-btn');
+        if (taskBtn) {{
+          taskBtn.onclick = (e) => {{
+            e.stopPropagation();
+            openTaskModal(item.container_name);
           }};
         }}
 
@@ -3262,6 +3284,66 @@ def create_app(docker_client=None):
           handleCardExpand(card);
         }});
       }})();
+
+      // ---- 「任务」按钮：实时编辑 claudeagent.md（本卡片自己的注入文件）----
+      const taskModal = document.getElementById("task-modal");
+      const taskTitle = document.getElementById("task-title");
+      const taskText = document.getElementById("task-text");
+      const taskStatus = document.getElementById("task-status");
+      let taskName = "";
+      let taskTimer = null;
+
+      async function openTaskModal(name) {{
+        taskName = name;
+        taskTitle.textContent = "任务 · claudeagent.md — " + name;
+        taskStatus.textContent = "加载中...";
+        taskModal.style.display = "flex";
+        taskText.value = "";
+        try {{
+          const r = await fetch(`/api/agents/${{encodeURIComponent(name)}}/claudeagent`, {{ cache: "no-store" }});
+          const d = await r.json();
+          if (!r.ok) {{ taskStatus.textContent = "ERROR: " + (d.error || r.status); return; }}
+          taskText.value = d.content || "";
+          taskStatus.textContent = taskText.value
+            ? ("已加载 " + taskText.value.length + " 字符 · 保存后每次 Claude 调用都会带上它")
+            : "（空）写这张卡片自己的核心目标/职责/对外接口；留空则不注入";
+          taskText.focus();
+        }} catch (e) {{ taskStatus.textContent = "ERROR: " + e; }}
+      }}
+
+      async function saveTask() {{
+        if (!taskName) return;
+        try {{
+          const r = await fetch(`/api/agents/${{encodeURIComponent(taskName)}}/claudeagent`, {{
+            method: "PUT",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ content: taskText.value }}),
+          }});
+          const d = await r.json();
+          if (!r.ok) {{ taskStatus.textContent = "ERROR: " + (d.error || r.status); return; }}
+          taskStatus.textContent = "已保存 " + d.bytes + " 字节 · " + new Date().toLocaleTimeString()
+            + " · 下次 Claude 调用即生效";
+        }} catch (e) {{ taskStatus.textContent = "ERROR: " + e; }}
+      }}
+
+      function closeTaskModal() {{
+        taskModal.style.display = "none";
+        taskName = "";
+      }}
+
+      document.getElementById("task-save").onclick = saveTask;
+      document.getElementById("task-close").onclick = closeTaskModal;
+      taskModal.addEventListener("click", (e) => {{ if (e.target === taskModal) closeTaskModal(); }});
+      taskText.addEventListener("input", () => {{
+        taskStatus.textContent = "编辑中…（停笔 1.5 秒自动保存）";
+        if (taskTimer) clearTimeout(taskTimer);
+        taskTimer = setTimeout(saveTask, 1500);
+      }});
+      document.addEventListener("keydown", (e) => {{
+        if (taskModal.style.display !== "flex") return;
+        if (e.key === "Escape") closeTaskModal();
+        if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {{ e.preventDefault(); saveTask(); }}
+      }});
     </script>
   </body>
 </html>"""

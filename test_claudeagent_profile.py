@@ -1,24 +1,28 @@
 # -*- coding: utf-8 -*-
-"""TDD 校验：每张卡片自己的注入文件 project/claudeagent.md。
+"""TDD 校验：每张卡片自己的注入文件 project/claudeagent.md（默认空，面板「任务」按钮编辑）。
 
-机制（与平台级注入区分开）：
-  - CLAUDE.md         = 平台级注入，所有卡片共享，平台维护
-  - claudeagent.md    = **这一张卡片自己的**注入，写本卡片的核心目标，卡片自己维护
-  - 生效方式：run_claude.js 每次调用都把它注入到消息最前面 →
-    面板「发送」、容器 /ask/claude、面板下发的注册/git init 指令全都自动带上它
-  - control 建卡片/重建时写模板（不覆盖已有内容），并提供 GET/PUT API
+机制：
+  - CLAUDE.md        = 平台级注入，所有卡片共享，平台维护
+  - claudeagent.md   = 这一张卡片自己的注入（核心目标/职责/对外接口），**默认空文件**，
+                       由用户通过面板卡片上的「任务」按钮（或 GET/PUT API）维护
+  - run_claude.js 每次调用读取它并注入到消息最前面（空文件则不注入），
+    因此面板「发送」、容器 /ask/claude、面板下发的注册/git-init 指令全都自动带上它
 
 覆盖点：
   A) 静态
-     1) app.py：模板存在且含核心目标/容器名/端口占位；ensure_agent_profile 在 create 与 recreate 都调用；
-        GET/PUT /claudeagent 端点存在；改写后 chown 给 agent。
-     2) run_claude.js：读取 claudeagent.md 并注入（含截断保护）。
-     3) systemreadme：把"每张卡片自己的注入"列为硬要求，并有独立章节说明分工与 API。
-     4) CLAUDE.md 提到 claudeagent.md。
-  B) 线上（缺 docker/面板则 SKIP）
-     5) 每张卡片宿主机 workspaces/<name>/claudeagent.md 存在且内容含自己的容器名。
-     6) GET API 返回内容；PUT 往返（写入标记 → 读回 → 还原）成功。
-     7) 容器内 project/claudeagent.md 与宿主机一致；容器内 run_claude.js 已含注入逻辑。
+     1) control：CLAUDEAGENT_FILENAME；ensure_agent_profile 写**空**文件（不写模板）；
+        create/recreate 都会 ensure；PUT 允许保存空内容。
+     2) 前端：「任务」按钮 + 模态编辑器（task-modal/task-text/task-save）+ 自动保存/Ctrl+S/Esc。
+     3) run_claude.js：读取并注入 claudeagent.md，带截断保护。
+     4) systemreadme：硬要求里列出、有独立章节、说明默认空 + 用「任务」按钮编辑。
+     5) INITIAL_MESSAGE 不再要求 agent 去填 claudeagent.md。
+  B) 线上
+     6) 每张卡片存在宿主侧文件（可以为空）。
+     7) GET/PUT 往返：写标记 → 读回 → 清空还原。
+     8) 容器内能看到该文件；容器内 run_claude.js 含注入逻辑。
+     9) 注入行为实测（容器内用假 claude 抓 stdin）：
+        - 有内容 → stdin 里带注入头 + 原始消息；
+        - 空文件 → 不带注入头，但原始消息照旧。
 
 超时机制：整个校验在守护线程中执行，主线程 join(timeout)，超时判失败。
 """
@@ -30,7 +34,7 @@ import threading
 import urllib.parse
 import urllib.request
 
-TIMEOUT_SECONDS = 120
+TIMEOUT_SECONDS = 180
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CONTROL = os.environ.get("CONTROL_URL", "http://localhost:19080")
 CARD = os.environ.get("PROFILE_CARD", "19083-email")
@@ -61,10 +65,16 @@ def read(rel):
 
 
 def docker(*args, **kw):
+    """跑 docker；input 一律按字节传（Windows 文本模式会把 \\n 变成 \\r\\n，喂给 sh 会坏）。"""
+    inp = kw.get("input")
+    if isinstance(inp, str):
+        inp = inp.encode("utf-8")
     try:
-        p = subprocess.run(["docker", *args], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=kw.get("timeout", 30))
-        return p.returncode, (p.stdout or "").strip(), (p.stderr or "").strip()
+        p = subprocess.run(["docker", *args], capture_output=True, input=inp,
+                           timeout=kw.get("timeout", 60))
+        out = (p.stdout or b"").decode("utf-8", "replace")
+        err = (p.stderr or b"").decode("utf-8", "replace")
+        return p.returncode, out.strip(), err.strip()
     except Exception as e:
         return 1, "", str(e)
 
@@ -82,29 +92,65 @@ def run_static():
     app = read("control/app.py")
     run_claude = read("config/rules/run_claude.js")
     sysreadme = read("config/rules/systemreadme.md")
-    claude_md = read("config/rules/CLAUDE.md")
 
-    check("control has claudeagent template", "CLAUDEAGENT_TEMPLATE" in app)
-    tmpl = app.split("CLAUDEAGENT_TEMPLATE = ")[1].split('"""')[1] if "CLAUDEAGENT_TEMPLATE = " in app else ""
-    for token in ("核心目标", "{container}", "{port}", "{agent_type}", "claudeagent.md"):
-        check("template mentions %s" % token, token in tmpl)
-
-    check("control defines ensure_agent_profile", "def ensure_agent_profile(" in app)
-    check("create + recreate both ensure the profile", app.count("ensure_agent_profile(container_name, host_port, agent_type)") >= 2)
-    check("profile file is chowned to agent",
-          "os.chown(path, AGENT_UID, AGENT_GID)" in app)
+    check("control defines CLAUDEAGENT_FILENAME", "CLAUDEAGENT_FILENAME" in app)
+    check("ensure_agent_profile defined", "def ensure_agent_profile(" in app)
+    check("default is an EMPTY file (no template)",
+          'f.write("")' in app and "CLAUDEAGENT_TEMPLATE" not in app)
+    check("create + recreate both ensure it",
+          app.count("ensure_agent_profile(container_name") >= 2)
+    check("profile file chowned to agent", "os.chown(path, AGENT_UID, AGENT_GID)" in app)
     check("GET /claudeagent endpoint", '@app.get("/api/agents/<path:name>/claudeagent")' in app)
     check("PUT /claudeagent endpoint", '@app.put("/api/agents/<path:name>/claudeagent")' in app)
-    check("bootstrap message asks to fill claudeagent.md", "claudeagent.md" in app.split("INITIAL_MESSAGE = ")[1].split("\n")[0])
+    check("PUT allows empty content", 'content.strip()' not in app.split("def api_put_claudeagent")[1].split("\n    def ")[0])
+    check("bootstrap message no longer asks to fill profile",
+          "claudeagent.md" not in app.split("INITIAL_MESSAGE = ")[1].split("\n")[0])
+
+    check("task button on card", 'data-action="task"' in app and ">任务</button>" in app)
+    for token in ('id="task-modal"', 'id="task-text"', 'id="task-save"', 'id="task-close"'):
+        check("modal has %s" % token, token in app)
+    check("modal wired: open/save/autosave",
+          "openTaskModal" in app and "saveTask" in app and "setTimeout(saveTask" in app)
+    check("modal shortcuts (Ctrl+S / Esc)", 'e.key === "s"' in app or 'e.key === "S"' in app)
 
     check("run_claude.js injects claudeagent.md", "claudeagent.md" in run_claude and "本卡片的核心目标" in run_claude)
+    check("injection skips empty file", "agentProfile" in run_claude and "if (agentProfile)" in run_claude)
     check("injection has truncation guard", "AGENT_PROFILE_MAX_CHARS" in run_claude)
 
-    check("systemreadme lists it as a hard requirement", "claudeagent.md" in sysreadme and "6)" in sysreadme)
-    check("systemreadme explains CLAUDE.md vs claudeagent.md", "平台级" in sysreadme and "本卡片自己" in sysreadme)
+    check("systemreadme lists it as hard requirement", "claudeagent.md" in sysreadme and "6)" in sysreadme)
+    check("systemreadme says default empty + 任务 button",
+          "默认是空文件" in sysreadme and "任务" in sysreadme)
     check("systemreadme documents the API", "/api/agents/<容器名>/claudeagent" in sysreadme)
-    check("systemreadme notes /ask/claude carries it", "自动带上本卡片的 claudeagent.md" in sysreadme)
-    check("global CLAUDE.md points to claudeagent.md", "claudeagent.md" in claude_md)
+
+
+def injection_probe(card, with_content):
+    """在容器里用假 claude 抓 stdin，验证注入行为（返回 (注入头命中数, 原始消息命中数)）。"""
+    marker = "MARKER-CORE-GOAL"
+    if with_content:
+        seed = "printf '%s\\n' '# 核心目标' '" + marker + "' > \"$T/home/.claude/workspace/project/claudeagent.md\""
+    else:
+        seed = ": > \"$T/home/.claude/workspace/project/claudeagent.md\""
+    script = "\n".join([
+        'T=$(mktemp -d)',
+        'mkdir -p "$T/home/.claude/workspace/project/logs" "$T/bin"',
+        seed,
+        'printf \'#!/bin/sh\\ncat > "$CAPTURE_OUT"\\n\' > "$T/bin/claude"',
+        'chmod +x "$T/bin/claude"',
+        'cd "$T/home/.claude/workspace/project"',
+        'HOME="$T/home" PATH="$T/bin:$PATH" CAPTURE_OUT="$T/out.txt" '
+        'CLAUDE_MSG="$(printf ORIGINAL-MSG | base64 | tr -d \'\\n\')" '
+        'node /home/agent/.claude/workspace/project/run_claude.js >/dev/null 2>&1',
+        # 注意：grep -c 无匹配时会打印 0 并返回 1，别再加 `|| echo 0`（会多输出一行）
+        'grep -c ' + marker + ' "$T/out.txt" 2>/dev/null; true',
+        'grep -c ORIGINAL-MSG "$T/out.txt" 2>/dev/null; true',
+    ])
+    rc, out, err = docker("exec", "-i", "-u", "agent", card, "sh", "-s", input=script)
+    lines = [l for l in out.splitlines() if l.strip().isdigit()]
+    injected = int(lines[0]) if len(lines) > 0 else 0
+    original = int(lines[1]) if len(lines) > 1 else 0
+    if os.environ.get("PROBE_DEBUG"):
+        print("   -> probe with_content=%s rc=%s out=%r err=%r" % (with_content, rc, out[:400], err[:400]), flush=True)
+    return injected, original
 
 
 def run_live():
@@ -124,44 +170,50 @@ def run_live():
         print("   -> missing: %s" % n, flush=True)
 
     target = CARD if CARD in names else names[0]
+    base = "%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target))
     try:
-        got = http_json("%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target)))
-        content = got.get("content") or ""
-        check("GET returns profile content (%s)" % target, got.get("ok") is True and len(content) > 50)
-        check("profile names its own container", target in content)
-        check("profile has 核心目标 section", "核心目标" in content)
+        got = http_json(base)
+        original_content = got.get("content")
+        check("GET returns profile content (%s)" % target,
+              got.get("ok") is True and isinstance(original_content, str))
     except Exception as e:
         check("GET returns profile content (%s)" % target, False)
         print("   -> %s" % e, flush=True)
         return
 
-    # PUT 往返：加标记 → 读回 → 还原
-    marker = "\n<!-- roundtrip-test -->\n"
+    marker = "# roundtrip-test\n"
     try:
-        http_json("%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target)),
-                  method="PUT", payload={"content": content + marker})
-        back = http_json("%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target))).get("content") or ""
-        check("PUT round-trip writes content", "roundtrip-test" in back)
+        http_json(base, method="PUT", payload={"content": marker})
+        back = http_json(base).get("content")
+        check("PUT round-trip writes content", marker in (back or ""))
+        http_json(base, method="PUT", payload={"content": ""})
+        cleared = http_json(base).get("content")
+        check("PUT accepts empty content (default)", cleared == "")
     except Exception as e:
         check("PUT round-trip writes content", False)
         print("   -> %s" % e, flush=True)
     finally:
         try:
-            http_json("%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target)),
-                      method="PUT", payload={"content": content})
-            restored = http_json("%s/api/agents/%s/claudeagent" % (CONTROL, urllib.parse.quote(target))).get("content") or ""
-            check("profile restored after test", "roundtrip-test" not in restored)
+            http_json(base, method="PUT", payload={"content": original_content})
+            restored = http_json(base).get("content")
+            check("profile restored after test", restored == (original_content or ""))
         except Exception as e:
             check("profile restored after test", False)
             print("   -> %s" % e, flush=True)
 
-    # 容器内：文件在、run_claude.js 已含注入逻辑
     rc, out, _ = docker("exec", "-u", "agent", target, "sh", "-c",
-                        "test -s /home/agent/.claude/workspace/project/claudeagent.md && echo OK")
+                        "test -f /home/agent/.claude/workspace/project/claudeagent.md && echo OK")
     check("container has project/claudeagent.md", out.strip().endswith("OK"))
     rc, out, _ = docker("exec", "-u", "agent", target, "sh", "-c",
                         "grep -c claudeagent.md /home/agent/.claude/workspace/project/run_claude.js")
     check("container run_claude.js has injection", out.strip().isdigit() and int(out.strip()) >= 1)
+
+    injected, original = injection_probe(target, True)
+    check("content -> injected into stdin", injected >= 1 and original >= 1)
+    print("   -> with content: injected=%s original=%s" % (injected, original), flush=True)
+    injected2, original2 = injection_probe(target, False)
+    check("empty file -> no injection, message intact", injected2 == 0 and original2 >= 1)
+    print("   -> empty file: injected=%s original=%s" % (injected2, original2), flush=True)
 
 
 def run():
