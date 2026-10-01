@@ -1,4 +1,4 @@
-INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md"
+INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。另外：project/claudeagent.md 是你这张卡片自己的注入文件（写本卡片的核心目标/职责/对外接口），请把里面残留的 TODO 换成真实内容。"
 # FRPC_PATH / FRPC_ALT_PATH: frpc 配置目录（容器内路径，由 docker-compose.yml 把宿主机 ../frpc 与 ../frp 挂载进来）。
 # 兼容 frp 与 frpc 两种目录：宿主机 frpc.ini 可能位于 frp 或 frpc 目录，优先使用实际存在的那个。
 # 使用位置：resolve_frpc_config_path()（探测 frpc.ini 实际位置，约 L202）；add_frpc_rule()（写入端口映射规则）。
@@ -136,9 +136,37 @@ def build_git_init_message(container_name):
 
 
 # AGENT_UID / AGENT_GID: 容器内 agent 用户的 uid/gid（见 agents/claude/Dockerfile 的 useradd -u 501 -g 20）。
-# 注册表要被卡片里的 Hub 进程（以 agent 身份运行）写入，所以文件属主必须是它，否则 POST /api/tools 会 500。
+# 注册表要被卡片里的 Hub 进程（以 agent 身份写入），claudeagent.md 也要被卡片 agent 改写，所以属主必须是它。
 AGENT_UID = 501
 AGENT_GID = 20
+
+# CLAUDEAGENT_TEMPLATE: 每张卡片自己的注入文件（project/claudeagent.md）模板。
+# 机制：CLAUDE.md 是平台级注入（所有卡片共享，平台维护）；claudeagent.md 是**这一张卡片自己的**
+# 注入（核心目标 / 职责 / 对外接口），由卡片 agent 维护、control 建卡片时生成模板，
+# 并由 run_claude.js 注入到每次 Claude 调用前面（因此 /ask/claude 也自动带上它）。
+CLAUDEAGENT_TEMPLATE = """# {container} · 核心目标
+
+> 这是 **claudeagent.md** —— **本卡片自己的**注入文件（每张卡片一份）。它会被 run_claude.js
+> 注入到每次 Claude 调用，所以别的容器卡片通过 /ask/claude 调你时，也带着这份目标。
+> 平台级约定见同目录 `CLAUDE.md` / `systemreadme.md`；两者冲突时以平台约定为准。
+
+## 我是谁
+- 容器：`{container}` ／ 类型：`{agent_type}` ／ 宿主机端口：`{port}`
+- 对外地址：http://dimond.top:{port}
+- 对外接口：`/ask/claude`（问答）、`/health`；其余功能性接口见 19081 Hub 上的注册记录
+
+## 核心目标（务必写清，1-3 条）
+- TODO：用一两句话写清本卡片存在的目的（例如「提供邮件收发与回复追踪服务」）。
+
+## 职责边界
+- 负责：TODO
+- 不负责：TODO
+
+## 交付与维护
+- 交付：代码 + README/SKILL + logs 记录，一次做完，不留半成品。
+- 核心目标或对外接口有变化时更新本文件；每次对话后 `git commit`（见 skill `hermit-git`）。
+"""
+
 
 # agent_states: 容器卡片状态字典，key=container_name, value="idle"|"thinking"|"done"
 # "idle": 空闲（绿色） / "thinking": 思考中（黄色） / "done": 回答完毕（红色+闪烁）
@@ -498,6 +526,39 @@ def create_app(docker_client=None):
         os.makedirs(path, exist_ok=True)
         return {path: {"bind": "/config", "mode": "rw"}}
 
+    # ---- 每张卡片自己的注入文件 project/claudeagent.md（核心目标）----
+    def _agent_profile_path(container_name):
+        """claudeagent.md 的路径（**容器内路径**）。
+
+        注意：control 自己是跑在容器里的，读写文件必须用容器内挂载路径（/workspaces/...）；
+        HOST_WORKSPACES_ROOT 是宿主机路径，只适合传给 Docker 当 bind source（create/recreate 用）。
+        混用会把文件写到 control 自己文件系统里一个叫 "C:" 的目录下——踩过。
+        """
+        return os.path.join(app.config["WORKSPACES_ROOT"], container_name, "claudeagent.md")
+
+    def ensure_agent_profile(container_name, host_port, agent_type):
+        """确保卡片有自己的注入文件；不存在或是空文件才写模板，绝不覆盖已有内容。
+
+        与平台级 CLAUDE.md（所有卡片共享）区分：claudeagent.md 是这张卡片自己的核心目标，
+        由卡片 agent 维护，run_claude.js 每次调用都会注入它（含 /ask/claude）。
+        """
+        path = _agent_profile_path(container_name)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path) or os.path.getsize(path) == 0:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(CLAUDEAGENT_TEMPLATE.format(container=container_name,
+                                                        port=host_port,
+                                                        agent_type=agent_type or "claude"))
+            try:
+                os.chown(path, AGENT_UID, AGENT_GID)
+                os.chmod(path, 0o664)
+            except Exception:
+                pass
+        except Exception as e:
+            print("[claudeagent] ensure %s failed: %s" % (path, e), flush=True)
+        return path
+
     def create_agent(agent_type, custom_name, body=None):
         _d("create", f"ENTRY: type={agent_type} name={custom_name}")
         if agent_type not in AGENT_SPECS:
@@ -524,6 +585,8 @@ def create_app(docker_client=None):
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}/sessions", 501, 20)
+        # 每张卡片自己的注入文件（核心目标）——不存在则写模板
+        ensure_agent_profile(container_name, host_port, agent_type)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
@@ -680,6 +743,8 @@ def create_app(docker_client=None):
         os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
         os.chown(f"{host_logs_root}/{container_name}", 501, 20)
         os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
+        # 每张卡片自己的注入文件（核心目标）——重建时也要保证存在（不覆盖已有内容）
+        ensure_agent_profile(container_name, host_port, agent_type)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
         else:
@@ -2023,6 +2088,54 @@ def create_app(docker_client=None):
         if not ok:
             return jsonify({"error": err or "dispatch failed"}), 500
         return jsonify({"ok": True, "dispatched": True, "container_name": name, "sent_at": now_iso()})
+
+    @app.get("/api/agents/<path:name>/claudeagent")
+    def api_get_claudeagent(name):
+        """读取本卡片自己的注入文件 claudeagent.md（核心目标）。"""
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        path = ensure_agent_profile(name, container_host_port(container), labels.get("hermit.agent_type", ""))
+        content = ""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "container_name": name,
+                        "path": "project/claudeagent.md", "content": content})
+
+    @app.put("/api/agents/<path:name>/claudeagent")
+    def api_put_claudeagent(name):
+        """写入本卡片自己的注入文件（面板或卡片 agent 更新核心目标）。"""
+        body = request.get_json(silent=True) or {}
+        content = body.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return jsonify({"error": "content is required"}), 400
+        try:
+            _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        path = _agent_profile_path(name)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            try:
+                os.chown(path, AGENT_UID, AGENT_GID)
+                os.chmod(path, 0o664)
+            except Exception:
+                pass
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "container_name": name, "path": "project/claudeagent.md",
+                        "bytes": len(content.encode("utf-8"))})
 
     def _port_config_path(container_name):
         """容器工作目录下的 config/port.txt 路径。"""
