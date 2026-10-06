@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Hermit Tools Hub Flask app（19081 对接文档首页 + /api/tools 接口 + /p/<name> 代理）。
+"""Hermit Tools Hub Flask app（18081 对接文档首页 + /api/tools 接口 + /p/<name> 代理）。
 
-独立运行于 19081-hub 容器（宿主机 19081），提供：
+独立运行于 18081-hub 容器（宿主机 18081），提供：
   - 首页「工具知识库」：底部工具导航 + iframe 预览 + Docs 查看器
   - Hub 公共接口文档（介绍所有重要功能性接口）
   - 示例工具文档（抽自 tools/obs 项目，作为注册范本）
   - /api/tools 系列注册/查询/注销接口
-  - /p/<name> 同源代理（转发到 http://dimond.top:19xxx）
+  - /p/<name> 同源代理（转发到 http://dimond.top:18xxx）
 """
 import json
 import urllib.request
@@ -18,14 +18,14 @@ from . import registry
 
 # TOOLS_HUB_PORT_DEFAULT: create_tools_hub_app 首页标题展示的 Hub 端口默认值（可被 control 传入实际端口）
 # 使用位置：create_tools_hub_app() 参数默认值
-TOOLS_HUB_PORT_DEFAULT = 19081
+TOOLS_HUB_PORT_DEFAULT = 18081
 
 # HUB_API_DOC: 首页展示的 Hub 公共接口文档（Markdown）。
-# 介绍 Hub 自身所有重要功能性接口；工具对外调用地址统一 http://dimond.top:19xxx。
+# 介绍 Hub 自身所有重要功能性接口；工具对外调用地址统一 http://dimond.top:18xxx。
 # 使用位置：create_tools_hub_app() 首页渲染（hub_index）。
 HUB_API_DOC = """# Hub 公共接口文档
 
-Hub 位于 `19081`，是所有工具的统一对接入口。已注册工具通过 `http://dimond.top:19xxx`（xxx 为该容器卡片分配的宿主机端口）对外提供服务。
+Hub 位于 `18081`，是所有工具的统一对接入口。已注册工具通过 `http://dimond.top:18xxx`（xxx 为该容器卡片分配的宿主机端口）对外提供服务。
 
 ## 功能性接口
 
@@ -33,7 +33,7 @@ Hub 位于 `19081`，是所有工具的统一对接入口。已注册工具通�
 - `POST /api/tools` — 注册一个工具（完整记录或简化记录）
 - `GET /api/tools/{name}` — 查询单个工具详情
 - `DELETE /api/tools/{name}` — 注销工具
-- `GET /p/{name}/` — 同源代理到该工具的 Web UI（`http://dimond.top:19xxx`）
+- `GET /p/{name}/` — 同源代理到该工具的 Web UI（`http://dimond.top:18xxx`）
 - `GET /` — 本首页（工具知识库 + 文档）
 
 ## 注册格式（POST /api/tools）
@@ -46,7 +46,7 @@ Hub 位于 `19081`，是所有工具的统一对接入口。已注册工具通�
   "display_name": "OBS 图床",
   "description": "文件托管、断点续传、公告板服务",
   "doc_md": "# OBS 图床 ...",
-  "port": 19082
+  "port": 18082
 }
 ```
 
@@ -54,8 +54,8 @@ Hub 位于 `19081`，是所有工具的统一对接入口。已注册工具通�
 
 ```json
 {
-  "container_name": "19082-writer",
-  "host_port": 19082,
+  "container_name": "18082-writer",
+  "host_port": 18082,
   "agent_type": "claude",
   "description": "一句话描述"
 }
@@ -65,13 +65,13 @@ Hub 位于 `19081`，是所有工具的统一对接入口。已注册工具通�
 
 ```bash
 # 列出所有工具
-curl http://dimond.top:19081/api/tools
+curl http://dimond.top:18081/api/tools
 
 # 查询单个工具
-curl http://dimond.top:19081/api/tools/obs
+curl http://dimond.top:18081/api/tools/obs
 
-# 容器卡片之间的调用统一走 http://dimond.top:19xxx
-curl http://dimond.top:19xxx/emails/?limit=5
+# 容器卡片之间的调用统一走 http://dimond.top:18xxx
+curl http://dimond.top:18xxx/emails/?limit=5
 ```
 """
 
@@ -135,7 +135,7 @@ iframe.active { display: block; }
 </head>
 <body>
 <div class="top-bar">
-  <div class="title">Tools 知识库 <span class="badge">19081-19999</span></div>
+  <div class="title">Tools 知识库 <span class="badge">18081-18999</span></div>
   <div class="current" id="currentTarget">选择一个工具查看</div>
   <div class="actions">
     <button id="btnDoc" type="button">Docs</button>
@@ -158,7 +158,7 @@ iframe.active { display: block; }
   <iframe id="frame" title="tool ui" allow="clipboard-read; clipboard-write"></iframe>
   <div class="welcome" id="welcome">
     <h1>Tools 知识库</h1>
-    <p>选择一个工具查看其功能和文档。端口范围 <code>19081-19999</code> 为 Hermit 工具类（MCP 服务器）保留端口。</p>
+    <p>选择一个工具查看其功能和文档。端口范围 <code>18081-18999</code> 为 Hermit 工具类（MCP 服务器）保留端口。</p>
     <p>当前注册的工具显示在底部标签栏中，点击加载工具的 Web 界面，点击 <code>Docs</code> 按钮查看工具文档。</p>
   </div>
   <div class="doc-viewer" id="docViewer"></div>
@@ -293,7 +293,7 @@ setInterval(load, 10000);
 
 
 def create_tools_hub_app(tools_hub_port=TOOLS_HUB_PORT_DEFAULT):
-    """19081 工具 Hub（对接文档）：首页展示工具知识库、公共接口文档、示例工具文档，并提供 /api/tools 与 /p/<name> 代理。"""
+    """18081 工具 Hub（对接文档）：首页展示工具知识库、公共接口文档、示例工具文档，并提供 /api/tools 与 /p/<name> 代理。"""
     hub = Flask("hermit_tools_hub")
     hub.config["JSON_AS_ASCII"] = False
 

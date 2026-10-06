@@ -31,7 +31,7 @@ import urllib.request
 TIMEOUT_SECONDS = 120
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CLAUDE_DIR = os.path.join(ROOT, "config", "claude")
-PROFILES_URL = os.environ.get("PROFILES_URL", "http://localhost:19080/api/config/profiles")
+PROFILES_URL = os.environ.get("PROFILES_URL", "http://localhost:18080/api/config/profiles")
 
 # profile -> (config.json.X 里的 ANTHROPIC_MODEL, base_url)
 EXPECT = {
@@ -135,7 +135,7 @@ def run():
         skip("default settings/config model keys", "files not found")
 
     # 8) 线上 API 能列出这 4 个 profile
-    #    注意：宿主 curl localhost:19080 可能被沙箱/端口转发误导，
+    #    注意：宿主 curl localhost:18080 可能被沙箱/端口转发误导，
     #    因此先试 HTTP，失败则回退到 docker exec 在容器内取真实值。
     got = None
     try:
@@ -156,7 +156,7 @@ def run():
                   "'http://127.0.0.1:8080/api/config/profiles',timeout=10).read().decode());"
                   "print(json.dumps(d))")
             out = subprocess.run(
-                ["docker", "exec", "hermit-control-19080", "python3", "-c", py],
+                ["docker", "exec", "hermit-control-18080", "python3", "-c", py],
                 capture_output=True, text=True, timeout=30)
             if out.returncode == 0 and out.stdout.strip().startswith("{"):
                 got = set(json.loads(out.stdout.strip()).get("profiles") or [])
@@ -233,7 +233,7 @@ def check_local_model():
     try:
         import subprocess
         out = subprocess.run(
-            ["docker", "exec", "19087-gpussh", "curl", "-s", "--max-time", "20",
+            ["docker", "exec", "18087-gpussh", "curl", "-s", "--max-time", "20",
              "-o", "/dev/null", "-w", "%{http_code}",
              "http://host.docker.internal:8000/v1/models"],
             capture_output=True, text=True, timeout=40)

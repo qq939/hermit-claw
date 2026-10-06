@@ -2,7 +2,7 @@
 # Hermit agent 容器看门狗：8082 上的 web app 不响应就重跑 start.sh。
 #
 # 背景（实测踩到）：容器启动时 CMD 只拉一次 start.sh，偶发失败就再没有第二次机会
-# ——19081-hub 卡片重启后 web 没起来，它的 logs/start.log 里一条记录都没有。
+# ——18081-hub 卡片重启后 web 没起来，它的 logs/start.log 里一条记录都没有。
 # 这里每 30 秒探测一次 8082：连不上就重跑 start.sh（幂等：start.sh → user_start.sh
 # 会先清理旧进程再拉起）。
 #

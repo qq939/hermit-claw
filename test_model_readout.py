@@ -42,7 +42,7 @@ TIMEOUT_SECONDS = 90
 ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_PATH = os.path.join(ROOT, "control", "app.py")
 CLAUDE_DIR = os.path.join(ROOT, "config", "claude")
-CONTROL = os.environ.get("CONTROL_URL", "http://localhost:19080")
+CONTROL = os.environ.get("CONTROL_URL", "http://localhost:18080")
 
 # profile -> (ANTHROPIC_MODEL, base_url)
 EXPECT_PROFILES = {

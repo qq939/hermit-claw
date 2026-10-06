@@ -1,4 +1,10 @@
 INITIAL_MESSAGE = "本项目非回合对话模式，对话后必须交付完整代码与交付件，使命必达。禁止中途确认，禁止未完成中断。禁止进入plan模式，直接行动，立刻调用工具，只输出结果。优先使用`Glob`/`Grep`工具代替`Read`工具。你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。"
+
+# TOOL_INITIAL_MESSAGE: 工具类容器专属初始提示词（FORK为工具功能部署完成后发送）
+# 与普通容器不同：部署完成后必须到 18081 注册 doc（通过 /tools 接口，规范见 systemreadme.md 第15章）
+# 使用位置：create_agent() 初始消息发送逻辑（tool=True 时替代 INITIAL_MESSAGE）
+TOOL_INITIAL_MESSAGE = "你负责的是完整的开发、测试、发现bug、变更的流程，项目是web app 8082（端口号），web app 8082所在的目录是/home/agent/.{agent}/workspace/project，如果project文件夹有web app，请查看启动脚本是否存在，/home/agent/.{agent}/workspace/project/user_start.sh。如果不存在启动脚本，请立即写好启动脚本user_start.sh，输出日志到当前目录下的logs/start.log。并且整理日志文件logs/agent_tui.log里的主要内容，梳理出项目构建的结构和细节，总结最后3轮对话的内容。项目所有惯例信息都在systemreadme.md中记载，最后更新项目README.md和项目SKILL.md。与普通容器不同，你部署好以后必须到18081注册doc：调用POST /tools/doc/register接口，请求体为JSON格式，包含name字段（填你的容器名）与content字段（填本工具说明），encoding字段可选，同名注册会自动覆盖并递增version；注册后调用GET /tools/doc/read接口并携带name参数验证已注册的doc。接口访问地址为http://18081/tools/doc/register与http://18081/tools/doc/read，详细规范见systemreadme.md第15章。"
+
 # FRPC_PATH / FRPC_ALT_PATH: frpc 配置目录（容器内路径，由 docker-compose.yml 把宿主机 ../frpc 与 ../frp 挂载进来）。
 # 兼容 frp 与 frpc 两种目录：宿主机 frpc.ini 可能位于 frp 或 frpc 目录，优先使用实际存在的那个。
 # 使用位置：resolve_frpc_config_path()（探测 frpc.ini 实际位置，约 L202）；add_frpc_rule()（写入端口映射规则）。
@@ -36,7 +42,7 @@ from flask import Flask, jsonify, make_response, request, send_file
 from flask_sock import Sock
 from tools.hub import registry as tools_hub
 
-# 注册表共享路径：control 面板与 19081 Hub 卡片必须读写同一份 tools_registry.json。
+# 注册表共享路径：control 面板与 18081 Hub 卡片必须读写同一份 tools_registry.json。
 #   - control 容器：./config 挂到 /config → 用 /config/registry/tools_registry.json
 #   - agent 卡片：宿主机 config/registry 挂到卡片的 /config → 用默认 /config/tools_registry.json
 # 两者指向宿主机同一个文件 config/registry/tools_registry.json（建卡片时挂载，见 _registry_volume）。
@@ -45,11 +51,11 @@ tools_hub.TOOLS_REGISTRY_PATH = (os.environ.get("TOOLS_REGISTRY_PATH")
 
 # GLOBAL PARAMETERS
 # Used in find_next_port (line 76) as the first generated agent host port.
-START_HOST_PORT = 19081
+START_HOST_PORT = 18081
 # Used in find_next_port (line 76) as the upper bound for generated host ports.
-END_HOST_PORT = 19999
-# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（19081），由独立容器 19081-hub 提供对接文档首页 + /api/tools 接口
-TOOLS_HUB_PORT = 19081
+END_HOST_PORT = 18999
+# TOOLS_HUB_PORT: 工具 Hub 宿主机端口（18081），由独立容器 18081-hub 提供对接文档首页 + /api/tools 接口
+TOOLS_HUB_PORT = 18081
 # Used in create_agent (line 123) and API responses to enforce fixed in-container service port.
 SERVICE_PORT = 8082
 # Used in helper filters (line 52, 67) to identify containers created by this control plane.
@@ -77,14 +83,14 @@ HOST_WORKSPACES_ROOT_ENV = "HOST_WORKSPACES_ROOT"
 # 使用位置：create_app（解析 app.config["HOST_TOOLS_ROOT"]，约 L154）；create_agent / recreate_agent（读取 host_tools_root 并挂载 volume）。
 HOST_TOOLS_ROOT_ENV = "HOST_TOOLS_ROOT"
 
-# HUB_API_URL: 容器内访问 19081 Hub 注册接口的地址。
-# host.docker.internal 指向宿主机（19081 已发布到宿主机），比走公网域名更可靠。
-HUB_API_URL = "http://host.docker.internal:19081/api/tools"
+# HUB_API_URL: 容器内访问 18081 Hub 注册接口的地址。
+# host.docker.internal 指向宿主机（18081 已发布到宿主机），比走公网域名更可靠。
+HUB_API_URL = "http://host.docker.internal:18081/api/tools"
 
 # REGISTER_MESSAGE: 面板「注册」按钮下达给容器的指令模板。
 # 设计要点：注册内容由**容器自己**按 Hub 规范与真实接口生成（功能性 API + /ask/claude），
 # control 不再代写固定记录 —— 否则 Hub 上的文档是模板套话，别的卡片照它调不通。
-REGISTER_MESSAGE = """【注册到 19081 Hub】请按 Hub 规范，把本容器的对外能力注册到 Hub。
+REGISTER_MESSAGE = """【注册到 18081 Hub】请按 Hub 规范，把本容器的对外能力注册到 Hub。
 
 容器：{container}
 宿主机端口：{port}（对外调用地址统一用 http://dimond.top:{port}）
@@ -313,10 +319,12 @@ def create_app(docker_client=None):
     def display_containers():
         items = []
         for c in all_containers():
+            if is_tool(c):
+                continue
             if is_managed(c):
                 items.append(c)
                 continue
-            if is_compose_member(c) and c.name not in ("hermit-control-19080", "hermit-ssh-gateway", "openclaw-gateway") and c.name.startswith("hermit-agent-"):
+            if is_compose_member(c) and c.name not in ("hermit-control-18080", "hermit-ssh-gateway", "openclaw-gateway") and c.name.startswith("hermit-agent-"):
                 items.append(c)
         return sorted(items, key=lambda c: c.name)
 
@@ -336,6 +344,31 @@ def create_app(docker_client=None):
                     if binding and binding.get("HostPort"):
                         return int(binding["HostPort"])
         return None
+
+    # TOOL_START_PORT: 工具类容器起始宿主机端口（FORK为工具功能从 18000 开始注册端口）
+    TOOL_START_PORT = 18000  # 使用位置：find_tool_port() 端口分配、is_tool() 工具容器判断
+    # TOOL_END_PORT: 工具类容器终止宿主机端口
+    TOOL_END_PORT = 18079  # 使用位置：find_tool_port() 端口分配上限、is_tool() 工具容器判断
+
+    def is_tool(container):
+        """18000-18079 工具类容器，不在 control 面板展示"""
+        name = getattr(container, "name", "") or ""
+        if name.startswith("hermit-tool-"):
+            return True
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        if labels.get("hermit.tool") == "true":
+            return True
+        port = container_host_port(container)
+        return port is not None and TOOL_START_PORT <= port <= TOOL_END_PORT
+
+    def find_tool_port():
+        # 工具类端口分配：遍历 TOOL_START_PORT..TOOL_END_PORT（18000-18079）
+        # 遍历全部容器（含 hermit-tool-* 非 managed 容器），避免与既有工具端口冲突
+        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
+        for port in range(TOOL_START_PORT, TOOL_END_PORT + 1):
+            if port not in used:
+                return port
+        raise RuntimeError("No available tool host port in configured range")
 
     def resolve_frpc_config_path():
         # 兼容 frp / frpc 两种目录：优先返回实际存在 frpc.ini 的目录。
@@ -421,7 +454,9 @@ def create_app(docker_client=None):
             print(f"[scp] ERROR: {e}", flush=True, file=sys.stderr)
 
     def find_next_port():
-        used = {p for p in [container_host_port(c) for c in managed_containers()] if p is not None}
+        # 遍历全部容器（含非 managed 的 compose 服务，如 ssh-gateway/obs），
+        # 避免分配出已被占用的端口（否则 docker run 会报 port already allocated）。
+        used = {p for p in [container_host_port(c) for c in all_containers()] if p is not None}
         for port in range(START_HOST_PORT, END_HOST_PORT + 1):
             if port not in used:
                 return port
@@ -535,12 +570,14 @@ def create_app(docker_client=None):
             print("[claudeagent] ensure %s failed: %s" % (path, e), flush=True)
         return path
 
-    def create_agent(agent_type, custom_name, body=None):
-        _d("create", f"ENTRY: type={agent_type} name={custom_name}")
+    def create_agent(agent_type, custom_name, body=None, tool=False, forced_host_port=None):
+        _d("create", f"ENTRY: type={agent_type} name={custom_name} tool={tool}")
         if agent_type not in AGENT_SPECS:
             raise ValueError("Unsupported agent type")
         spec = AGENT_SPECS[agent_type]
-        host_port = find_next_port()
+        # 根据是否为工具容器选择端口分配函数；fork 场景由调用方传入已算好的端口，
+        # 避免两次 find_*_port() 结果不一致导致「Fork expected X, got Y」。
+        host_port = forced_host_port or (find_tool_port() if tool else find_next_port())
         normalized_name = _safe_name_part(custom_name)
         container_name = f"{host_port}-{normalized_name}"
         _d("create", f"container={container_name} host_port={host_port}")
@@ -551,6 +588,8 @@ def create_app(docker_client=None):
             "hermit.host_port": str(host_port),
             "hermit.service_port": str(SERVICE_PORT),
         }
+        if tool:
+            labels["hermit.tool"] = "true"
         host_config_root = app.config["HOST_CONFIG_ROOT"]
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
@@ -663,18 +702,21 @@ def create_app(docker_client=None):
             _d("create", "sending initial message...")
             import time
             time.sleep(3)
+            # 必须先把 config/rules（含 run_claude.js / start.sh）拷进容器，再发初始消息，
+            # 否则初始消息执行 run_claude.js 会报 MODULE_NOT_FOUND（18115 卡片踩过此坑）。
+            scp_rules_to_container(container_name, project_path_for_agent_type(agent_type))
             user_msg = (body.get("message") or "").strip()
             msg_file = "/tmp/send_msg.sh"
             if agent_type in ("claude", "ollama"):
                 agent_states[container_name] = "thinking"
-                default_msg = INITIAL_MESSAGE.format(agent="claude")
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="claude")
                 log_path = "/home/agent/.claude/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
                 msg_b64 = __import__('base64').b64encode(msg_to_send.encode('utf-8')).decode('ascii')
                 script = f"CLAUDE_MSG='{msg_b64}' node /home/agent/.claude/workspace/project/run_claude.js >> '{log_path}' 2>&1"
             else:
-                default_msg = INITIAL_MESSAGE.format(agent="openclaw")
+                default_msg = (TOOL_INITIAL_MESSAGE if tool else INITIAL_MESSAGE).format(agent="openclaw")
                 log_path = "/home/agent/.openclaw/workspace/project/logs/agent_tui.log"
                 msg_to_send = user_msg or default_msg
                 escaped_msg = msg_to_send.replace("'", "'\"'\"'")
@@ -839,7 +881,7 @@ def create_app(docker_client=None):
 
             _d("fork", "Step3: create_agent")
             body = {"message": ""}
-            payload = create_agent(agent_type, base_name, body=body)
+            payload = create_agent(agent_type, base_name, body=body, forced_host_port=new_host_port)
             _d("fork", f"payload={payload}")
             
             created_name = payload["container_name"]
@@ -865,6 +907,85 @@ def create_app(docker_client=None):
             raise ValueError(str(e))
         except Exception as e:
             _d("fork", f"ERROR: {e}\n{traceback.format_exc()}")
+            shutil.rmtree(dst_workspace, ignore_errors=True)
+            shutil.rmtree(dst_logs, ignore_errors=True)
+            raise
+
+    def fork_tool_agent(container_name, fork_name=None):
+        # FORK为工具：与 fork 相同流程，但端口从 TOOL_START_PORT(18000) 注册，
+        # 且 create_agent(tool=True) 发送专属初始提示词（部署后到 18081 注册 doc）
+        import shutil, traceback
+        debug_log = "/logs/hermit/debug.log"
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"\n=== FORK_TOOL START: {container_name} ===\n")
+
+        container = docker_client_or_default().containers.get(container_name)
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
+        agent_type = labels.get("hermit.agent_type") or ""
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"agent_type={agent_type}\n")
+
+        if agent_type not in AGENT_SPECS:
+            raise ValueError(f"Unsupported agent type: {agent_type}")
+
+        new_host_port = find_tool_port()
+        if fork_name and fork_name.strip():
+            base_name = _safe_name_part(fork_name.strip())
+        else:
+            base_name = derive_agent_basename(container_name)
+        new_container_name = f"{new_host_port}-{base_name}"
+
+        src_workspace = f"/workspaces/{container_name}"
+        dst_workspace = f"/workspaces/{new_container_name}"
+        dst_logs = f"/logs/{new_container_name}"
+
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Step1: _copy_workspace_tree {src_workspace} -> {dst_workspace}\n")
+            _copy_workspace_tree(src_workspace, dst_workspace)
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Step2: makedirs {dst_logs}\n")
+            os.makedirs(dst_logs, exist_ok=True)
+            try:
+                os.chown(dst_logs, 501, 20)
+            except Exception:
+                pass
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Step3: create_agent(tool=True)\n")
+            body = {"message": ""}  # 不跳过初始消息，发送 TOOL_INITIAL_MESSAGE
+            payload = create_agent(agent_type, base_name, body=body, tool=True, forced_host_port=new_host_port)
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"created payload: {payload}\n")
+            created_name = payload["container_name"]
+            if created_name != new_container_name:
+                created_container = docker_client_or_default().containers.get(created_name)
+                created_container.remove(force=True)
+                raise RuntimeError(f"Fork tool expected {new_container_name}, got {created_name}")
+
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Step4: add_frpc_rule\n")
+            add_frpc_rule(payload["host_port"])
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Step5: sleep 5 then scp\n")
+            import time
+            time.sleep(5)
+            
+            scp_rules_to_container(payload["container_name"], project_path_for_agent_type(agent_type))
+            
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"SUCCESS: {payload}\n")
+            return payload
+        except FileExistsError as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"ERROR FileExistsError: {e}\n")
+            raise ValueError(str(e))
+        except Exception as e:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"ERROR: {e}\n{traceback.format_exc()}\n")
             shutil.rmtree(dst_workspace, ignore_errors=True)
             shutil.rmtree(dst_logs, ignore_errors=True)
             raise
@@ -1182,10 +1303,8 @@ def create_app(docker_client=None):
         try:
             payload = create_agent(agent_type, name, body)
             add_frpc_rule(payload["host_port"])
-            if agent_type in ("claude", "ollama"):
-                scp_rules_to_container(payload["container_name"], "/home/agent/.claude/workspace/project")
-            else:
-                scp_rules_to_container(payload["container_name"], "/home/agent/.openclaw/workspace/project")
+            # 说明：config/rules 的拷贝已由 create_agent 在发送初始消息前完成，
+            # 这里不再重复 scp（避免每次建卡片多一次 SSH 连接）。
             return jsonify(payload), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -1829,6 +1948,10 @@ def create_app(docker_client=None):
                 "hash": "__FORK__",
                 "message": "****FORK****",
                 "is_current": "",
+            }, {
+                "hash": "__FORK_TOOL__",
+                "message": "****FORK为工具****",
+                "is_current": "",
             }]
             for line in log_lines:
                 if line.strip() and len(line) >= 10:
@@ -1873,6 +1996,21 @@ def create_app(docker_client=None):
                 return jsonify({
                     "ok": True,
                     "mode": "fork",
+                    "container_name": name,
+                    "new_container": payload["container_name"],
+                    "host_port": payload["host_port"],
+                })
+
+            # FORK为工具：端口从 18000 开始，部署后发送 TOOL_INITIAL_MESSAGE
+            if commit_hash == "__FORK_TOOL__":
+                try:
+                    fork_name = data.get("fork_name") or None
+                    payload = fork_tool_agent(name, fork_name=fork_name)
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
+                return jsonify({
+                    "ok": True,
+                    "mode": "fork_tool",
                     "container_name": name,
                     "new_container": payload["container_name"],
                     "host_port": payload["host_port"],
@@ -1995,7 +2133,7 @@ def create_app(docker_client=None):
 
     @app.post("/api/agents/<path:name>/register")
     def api_register_agent(name):
-        """注册 = 给容器下达指令，让它按 Hub 规范把自己的接口文档提交到 19081 Hub。
+        """注册 = 给容器下达指令，让它按 Hub 规范把自己的接口文档提交到 18081 Hub。
 
         注意：这里**不再**由 control 拼一份固定记录写注册表。注册内容（功能性 API 清单 +
         /ask/claude 接口 + doc_md）必须由容器自己按真实情况生成并 POST 到 Hub，
@@ -2031,7 +2169,7 @@ def create_app(docker_client=None):
 
     @app.delete("/api/agents/<path:name>/register")
     def api_unregister_agent(name):
-        """取消注册：把该容器在 19081 Hub 上的记录移除（按记录里的真实 name 删）。"""
+        """取消注册：把该容器在 18081 Hub 上的记录移除（按记录里的真实 name 删）。"""
         record = _tool_record_for_container(name)
         removed = None
         if record and record.get("name"):
@@ -2120,7 +2258,7 @@ def create_app(docker_client=None):
         return os.path.join(host_ws, container_name, "config", "port.txt")
 
     def _read_port_config(container_name):
-        """读取容器端口配置列表，返回 [ "8083:19083", "8084:19084" ]。"""
+        """读取容器端口配置列表，返回 [ "8083:18083", "8084:18084" ]。"""
         path = _port_config_path(container_name)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -2188,7 +2326,7 @@ def create_app(docker_client=None):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hermit Control 19080</title>
+    <title>Hermit Control 18080</title>
     <style>
       :root {{
         --bg: #070A10;
@@ -2435,7 +2573,7 @@ def create_app(docker_client=None):
             <button id="claudeAsk" style="padding:6px 12px;background:#3AE374;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600;">询问</button>
           </div>
         </div>
-        <div class="sub">创建类型：claude / openclaw@2026.2.9；端口从 19081 递增，容器名格式：端口号-容器名称。</div>
+        <div class="sub">创建类型：claude / openclaw@2026.2.9；端口从 18081 递增，容器名格式：端口号-容器名称。</div>
         <div class="panel">
           <div class="row">
             <select id="agentType"></select>
@@ -2872,14 +3010,14 @@ def create_app(docker_client=None):
         
         const registerBtn = div.querySelector('.register-btn');
         if (registerBtn) {{
-          registerBtn.title = "点击：向该容器下达注册指令（容器自己按 Hub 规范把接口文档提交到 19081 Hub）；Alt+点击：注销";
+          registerBtn.title = "点击：向该容器下达注册指令（容器自己按 Hub 规范把接口文档提交到 18081 Hub）；Alt+点击：注销";
           registerBtn.onclick = async (e) => {{
             const wasRegistered = registerBtn.dataset.registered === '1';
             const url = `/api/agents/${{encodeURIComponent(item.container_name)}}/register`;
 
             // Alt+点击 = 注销（把 Hub 上该卡片的记录删掉）
             if (wasRegistered && e.altKey) {{
-              if (!confirm(`注销 "${{item.container_name}}" 在 19081 Hub 上的注册记录？`)) return;
+              if (!confirm(`注销 "${{item.container_name}}" 在 18081 Hub 上的注册记录？`)) return;
               const r = await fetch(url, {{ method: "DELETE" }});
               const d = await r.json();
               if (!r.ok) {{
@@ -3000,13 +3138,14 @@ def create_app(docker_client=None):
           if (!hash) return;
           gitTools.style.display = "none";
           const isFork = hash === "__FORK__";
+          const isForkTool = hash === "__FORK_TOOL__";
           const gitMode = gitModeSelect ? gitModeSelect.value : "checkout";
-          const opLabel = isFork ? "fork" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout");
-          const targetLabel = isFork ? item.container_name : hash.substring(0,7);
+          const opLabel = isFork ? "fork" : (isForkTool ? "fork为工具" : (gitMode === "reset-hard" ? "git reset --hard" : "git checkout"));
+          const targetLabel = (isFork || isForkTool) ? item.container_name : hash.substring(0,7);
           
-          // Fork 时弹出命名对话框
+          // Fork / Fork为工具 时弹出命名对话框
           let forkName = null;
-          if (isFork) {{
+          if (isFork || isForkTool) {{
             const defaultName = item.container_name.replace(/^\\d+-/, '');
             const input = prompt("请输入新容器名称：", defaultName);
             if (input === null || !input.trim()) {{
@@ -3017,7 +3156,7 @@ def create_app(docker_client=None):
           }}
           
           logBox.textContent += `\n[${{opLabel}} ${{targetLabel}}] 执行中...\n`;
-          const body = isFork ? {{ commit_hash: hash, fork_name: forkName }} : {{ commit_hash: hash, hard: gitMode === "reset-hard" }};
+          const body = (isFork || isForkTool) ? {{ commit_hash: hash, fork_name: forkName }} : {{ commit_hash: hash, hard: gitMode === "reset-hard" }};
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/git-reset`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
@@ -3031,6 +3170,8 @@ def create_app(docker_client=None):
           }}
           if (d.mode === "fork") {{
             logBox.textContent += `[fork 完成] 新容器: ${{d.new_container}}\n`;
+          }} else if (d.mode === "fork_tool") {{
+            logBox.textContent += `[fork为工具 完成] 新容器: ${{d.new_container}}\n`;
           }} else {{
             const doneLabel = d.mode === "hard_reset" ? "git reset --hard 完成" : "git checkout 完成";
             logBox.textContent += `[${{doneLabel}}] ${{d.git_output || ""}}\n[容器重建中] ${{d.new_container}}\n`;
@@ -3083,7 +3224,7 @@ def create_app(docker_client=None):
         }};
         if (!managed) {{
           cmdInput.disabled = true;
-          cmdInput.placeholder = "该容器非19080创建（compose成员），默认只读显示";
+          cmdInput.placeholder = "该容器非18080创建（compose成员），默认只读显示";
           div.querySelector('button[data-action="recreate"]').disabled = true;
         }}
         return div;

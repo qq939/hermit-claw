@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # docker-compose.sh
-# Hermit 部署脚本（适配 Linux / macOS）：端口已固定为 19xxx（19080 控制面板 / 19081 工具 Hub）。
-# 脚本不再做任何字符串替换或端口偏移，直接部署 docker-compose.yml 中已写好的 control-19080 服务。
+# Hermit 部署脚本（适配 Linux / macOS）：端口已固定为 18xxx（18080 控制面板 / 18081 工具 Hub）。
+# 脚本不再做任何字符串替换或端口偏移，直接部署 docker-compose.yml 中已写好的 control-18080 服务。
 
 set -euo pipefail
 
@@ -17,8 +17,8 @@ export PWD="$SCRIPT_DIR"
 # 构建 agent 模板镜像（带 profiles: ["templates"]，默认 compose up 不会构建，需显式构建）
 docker compose build agent-image-claude agent-image-openclaw agent-image-ollama
 
-# 部署 control 服务（docker-compose.yml 已固定 control-19080: 19080/19081 端口映射）
-docker compose up -d --build control-19080
+# 部署 control 服务（docker-compose.yml 已固定 control-18080: 18080/18081 端口映射）
+docker compose up -d --build control-18080
 
-echo "部署完成，控制面板访问地址: http://localhost:19080"
-echo "工具 Hub 对接文档: http://localhost:19081"
+echo "部署完成，控制面板访问地址: http://localhost:18080"
+echo "工具 Hub 对接文档: http://localhost:18081"

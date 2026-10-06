@@ -7,7 +7,7 @@
 
 覆盖点：
   1) 静态：control/app.py 的 index() f-string 区内，不存在会退化成真实换行的 \\n。
-  2) 动态：抓取已部署的 http://localhost:19080/ ，扫描所有 <script>，
+  2) 动态：抓取已部署的 http://localhost:18080/ ，扫描所有 <script>，
      检测单/双引号字符串是否跨行（跨行即 JS 语法错误）。
      —— 服务不可达时标记 SKIP，不误报。
 
@@ -21,7 +21,7 @@ import urllib.request
 
 TIMEOUT_SECONDS = 60
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CONTROL_URL = os.environ.get("CONTROL_URL", "http://localhost:19080/")
+CONTROL_URL = os.environ.get("CONTROL_URL", "http://localhost:18080/")
 
 failures = []
 skips = []

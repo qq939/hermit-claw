@@ -1,11 +1,11 @@
-# 十五、19081 Hub — Tools 知识库（对接文档 + 公共接口）
+# 十五、18081 Hub — Tools 知识库（对接文档 + 公共接口）
 
-19081 Hub 是 Hermit 的工具知识库与对接文档中心。tools 下的每个项目（obs、email、
+18081 Hub 是 Hermit 的工具知识库与对接文档中心。tools 下的每个项目（obs、email、
 github 等）都可以注册到 Hub，把「自己是谁、提供哪些接口、怎么调用」展示在首页。
 
 ## 15.1 首页（工具知识库）
 
-访问 http://dimond.top:19081：
+访问 http://dimond.top:18081：
 
 - 底部 pills 导航：切换已注册工具。
 - iframe：预览工具的 Web UI。
@@ -31,11 +31,11 @@ agent 自己完成注册：
    静态页面等，**以及必带的 `/ask/claude`**（其他容器卡片靠它跟你对话）；
 3. 生成完整记录（`doc_md` 用 Markdown：功能概览 + API 端点表 + curl 示例，地址统一
    `http://dimond.top:<你的宿主机端口>`）；
-4. 自己 `POST http://host.docker.internal:19081/api/tools` 提交并确认 200。
+4. 自己 `POST http://host.docker.internal:18081/api/tools` 提交并确认 200。
 
 约定：
 
-- `name` 用容器名派生（`19083-email` → `email`），面板据此显示「已注册」；
+- `name` 用容器名派生（`18083-email` → `email`），面板据此显示「已注册」；
 - 再点一次「注册」= 让容器更新自己的注册信息（同名覆盖）；
 - Alt+点击按钮 = 注销；
 - 别把 control 当"代写方"：固定模板写出来的文档，别的卡片照着是调不通的。
@@ -55,7 +55,7 @@ agent 自己完成注册：
   "name": "obs",
   "display_name": "OBS 图床",
   "description": "文件托管、断点续传、公告板服务",
-  "port": 19082,
+  "port": 18082,
   "doc_md": "# OBS 图床 ..."
 }
 ```
@@ -71,8 +71,8 @@ agent 自己完成注册：
 
 ```json
 {
-  "container_name": "19082-writer",
-  "host_port": 19082,
+  "container_name": "18082-writer",
+  "host_port": 18082,
   "agent_type": "claude",
   "description": "写作工具，提供 /ask/claude 接口"
 }
@@ -80,8 +80,8 @@ agent 自己完成注册：
 
 ## 15.3 调用约定
 
-容器卡片之间的调用统一走宿主机端口：`http://dimond.top:19xxx`（xxx 为该工具分配的
-宿主机端口，19081-19999 区间）。不要使用旧域名或 18xxx 端口。
+容器卡片之间的调用统一走宿主机端口：`http://dimond.top:18xxx`（xxx 为该工具分配的
+宿主机端口，18081-18999 区间）。不要使用旧域名或 19xxx 端口。
 
 ## 15.4 示例工具（obs 图床）
 
@@ -99,7 +99,7 @@ agent 自己完成注册：
 - control 面板容器：`./config` 挂到 `/config`，写的就是上面那个文件；
 - agent 卡片：宿主机 `config/registry` 挂到卡片的 `/config`（建卡片时由 control 挂上）。
 
-因此面板卡片上的「注册 / 已注册」与 19081 Hub 首页读的是**同一份**注册表，注册后刷新
+因此面板卡片上的「注册 / 已注册」与 18081 Hub 首页读的是**同一份**注册表，注册后刷新
 Hub 页面即可看到。同名工具重复注册会覆盖旧记录。
 
 > 排查提示：若 Hub 首页看不到已注册工具，先确认卡片里有 `/config/tools_registry.json`

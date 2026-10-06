@@ -34,7 +34,7 @@ SMTP_SERVER = "smtp.qq.com"
 SMTP_PORT = 465
 IMAP_SERVER = "imap.qq.com"
 IMAP_PORT = 993
-TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:19081")
+TOOLS_HUB_URL = os.environ.get("TOOLS_HUB_URL", "http://host.docker.internal:18081")
 
 # Email 工具注册信息
 EMAIL_TOOL_INFO = {
@@ -67,10 +67,10 @@ EMAIL_TOOL_INFO = {
 
 ```bash
 # 查询最近邮件
-curl "http://dimond.top:19001/emails/?limit=5&days=3"
+curl "http://dimond.top:18001/emails/?limit=5&days=3"
 
 # 发送邮件
-curl -X POST http://dimond.top:19001/send-email/ \\
+curl -X POST http://dimond.top:18001/send-email/ \\
   -H "Content-Type: application/json" \\
   -d '{"to":"user@example.com","subject":"Hello","body":"Test"}'
 ```
@@ -78,7 +78,7 @@ curl -X POST http://dimond.top:19001/send-email/ \\
 }
 
 def register_tool():
-    """向 19081 Hub 注册本工具"""
+    """向 18081 Hub 注册本工具"""
     try:
         data = json.dumps(EMAIL_TOOL_INFO).encode("utf-8")
         req = urllib.request.Request(

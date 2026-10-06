@@ -47,9 +47,9 @@ def run():
     check("control no fixed FRPC_CONFIG_PATH", "FRPC_CONFIG_PATH" not in app)
     check("control add_frpc_rule uses cfg_path", "cfg_path = resolve_frpc_config_path()" in app)
 
-    # 4) docker-compose 同时挂载两种目录
-    check("compose mounts ../frpc", "${PWD}/../frpc:/Users/jimjiang/Downloads/frpc" in compose)
-    check("compose mounts ../frp", "${PWD}/../frp:/Users/jimjiang/Downloads/frp" in compose)
+    # 4) docker-compose 同时挂载两种目录（相对路径按 compose 文件所在目录解析，不依赖 ${PWD}）
+    check("compose mounts ../frpc", "../frpc:/Users/jimjiang/Downloads/frpc" in compose)
+    check("compose mounts ../frp", "../frp:/Users/jimjiang/Downloads/frp" in compose)
 
 
 if __name__ == "__main__":

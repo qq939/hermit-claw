@@ -3,8 +3,8 @@
 
 职责：
   - 维护已注册工具的持久化注册表（JSON 文件）
-  - 生成容器卡片"注册"时写入 19081 Hub 的调用指南（doc_md）
-  - 供 control 面板（/api/agents/<name>/register）与 19081 Hub（/api/tools）共用
+  - 生成容器卡片"注册"时写入 18081 Hub 的调用指南（doc_md）
+  - 供 control 面板（/api/agents/<name>/register）与 18081 Hub（/api/tools）共用
 
 全局参数（使用位置见行内注释）：
 """
@@ -30,7 +30,7 @@ _REGISTRY_LOCK = threading.Lock()
 _NAME_SANITIZE_PATTERN = re.compile(r"[^a-z0-9_-]+")
 
 # EXAMPLE_TOOL: 首页展示的「示例工具」注册范本（抽自 tools/obs 项目）。
-# 展示一个合格工具注册记录应包含的完整功能接口文档；对外调用地址统一 http://dimond.top:19xxx。
+# 展示一个合格工具注册记录应包含的完整功能接口文档；对外调用地址统一 http://dimond.top:18xxx。
 # 使用位置：tools/hub/app.py 首页渲染示例工具文档。
 EXAMPLE_TOOL = {
     "name": "obs",
@@ -38,7 +38,7 @@ EXAMPLE_TOOL = {
     "description": "文件托管、存储桶、断点续传、公告板(WebSocket)服务",
     "doc_md": """# OBS 图床 / 存储桶服务（示例注册范本）
 
-> 这是 tools 下项目的标准注册格式。已注册工具的对外调用地址统一为 `http://dimond.top:19xxx`（xxx 为该容器卡片分配的宿主机端口）。
+> 这是 tools 下项目的标准注册格式。已注册工具的对外调用地址统一为 `http://dimond.top:18xxx`（xxx 为该容器卡片分配的宿主机端口）。
 
 ## 功能概览
 
@@ -69,13 +69,13 @@ EXAMPLE_TOOL = {
 
 ```bash
 # 上传文件
-curl --upload-file file.txt http://dimond.top:19xxx/file.txt
+curl --upload-file file.txt http://dimond.top:18xxx/file.txt
 
 # 下载文件
-curl http://dimond.top:19xxx/file.txt -o file.txt
+curl http://dimond.top:18xxx/file.txt -o file.txt
 
 # 初始化断点续传
-curl -X POST http://dimond.top:19xxx/upload/init \\
+curl -X POST http://dimond.top:18xxx/upload/init \\
   -H "Content-Type: application/json" \\
   -d '{"filename":"a.bin","size":1048576,"hash":"...","chunk_size":1048576,"total_chunks":1}'
 ```
@@ -90,16 +90,16 @@ def now_iso():
 def derive_tool_name(container_name):
     """从容器名派生工具唯一名称（去掉端口前缀 / hermit-tool- 前缀 / 端口后缀）。"""
     name = (container_name or "").strip()
-    name = re.sub(r"^\d+-", "", name)          # 去掉前缀 "19081-"
+    name = re.sub(r"^\d+-", "", name)          # 去掉前缀 "18081-"
     name = re.sub(r"^hermit-tool-", "", name)  # 去掉 fork 工具前缀 "hermit-tool-"
-    name = re.sub(r"-\d+$", "", name)          # 去掉 fork 工具后缀 "-19082"
+    name = re.sub(r"-\d+$", "", name)          # 去掉 fork 工具后缀 "-18082"
     name = name.lower()
     name = _NAME_SANITIZE_PATTERN.sub("-", name).strip("-")
     return name or "tool"
 
 
 def build_usage_guide(container_name, host_port, agent_type, description=""):
-    """生成容器调用指南（Markdown），写入 19081 Hub docs。"""
+    """生成容器调用指南（Markdown），写入 18081 Hub docs。"""
     display = container_name or "unnamed"
     port_str = str(host_port) if host_port is not None else "未知"
     desc = (description or "").strip() or "%s 容器（%s）" % (agent_type or "unknown", display)
@@ -150,13 +150,13 @@ def normalize_tool_payload(body):
           "display_name": "OBS 图床",          # 可选：展示名
           "description": "一句话描述",          # 可选：简介
           "doc_md": "# OBS ...",              # 可选：完整功能接口文档（Markdown）
-          "port": 19082                       # 可选：宿主机端口（也可用 host_port）
+          "port": 18082                       # 可选：宿主机端口（也可用 host_port）
         }
 
     2) 简化记录（供 control 面板根据容器信息派生）：
         {
-          "container_name": "19082-writer",   # 必填：容器名，派生唯一 name
-          "host_port": 19082,                 # 可选：宿主机端口
+          "container_name": "18082-writer",   # 必填：容器名，派生唯一 name
+          "host_port": 18082,                 # 可选：宿主机端口
           "agent_type": "claude",             # 可选：容器类型 claude/ollama/openclaw
           "description": "一句话描述"          # 可选：简介
         }

@@ -2,9 +2,9 @@
 """TDD 校验：systemreadme 与 hermit-tools-hub skill 对 Hub 公共接口的简略介绍。
 
 覆盖点：
-  1) systemreadme 简略介绍 Hub 首页、完整/简化注册格式、统一调用地址 19xxx。
+  1) systemreadme 简略介绍 Hub 首页、完整/简化注册格式、统一调用地址 18xxx。
   2) hermit-tools-hub/SKILL.md 介绍所有重要公共接口与示例工具（obs）。
-  3) 无旧域名 obs.dimond.top、无 18xxx 端口。
+  3) 无旧域名 obs.dimond.top、无 19xxx 端口。
 
 超时机制：整个校验在守护线程中执行，主线程 join(timeout)，超时判失败。
 """
@@ -42,7 +42,7 @@ def run():
     check("systemreadme mentions name field", "name" in sysreadme)
     check("systemreadme mentions doc_md", "doc_md" in sysreadme)
     check("systemreadme mentions port field", "port" in sysreadme)
-    check("systemreadme uses dimond.top:19xxx", "http://dimond.top:19xxx" in sysreadme)
+    check("systemreadme uses dimond.top:18xxx", "http://dimond.top:18xxx" in sysreadme)
 
     # 2) skill 介绍所有重要公共接口 + 示例工具
     for token in ("GET /api/tools", "POST /api/tools",
@@ -50,13 +50,13 @@ def run():
                   "/p/{name}/"):
         check("skill mentions %s" % token, token in skill)
     check("skill mentions example tool obs", "obs" in skill and "示例工具" in skill)
-    check("skill uses dimond.top:19xxx", "http://dimond.top:19xxx" in skill)
+    check("skill uses dimond.top:18xxx", "http://dimond.top:18xxx" in skill)
 
-    # 3) 无旧域名 / 18xxx
+    # 3) 无旧域名 / 19xxx
     check("systemreadme no obs.dimond.top", "obs.dimond.top" not in sysreadme)
     check("skill no obs.dimond.top", "obs.dimond.top" not in skill)
-    check("systemreadme no 18xxx", not re.findall(r"18\d{3}", sysreadme))
-    check("skill no 18xxx", not re.findall(r"18\d{3}", skill))
+    check("systemreadme no 19xxx", not re.findall(r"19\d{3}", sysreadme))
+    check("skill no 19xxx", not re.findall(r"19\d{3}", skill))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
   2) 首页包含 Hub 公共接口文档，介绍所有重要功能性接口：
      GET/POST /api/tools、GET/DELETE /api/tools/{name}、GET /p/{name}/ 代理。
   3) 首页包含示例工具（OBS 图床）的完整接口文档（upload/notice/ws 等端点）。
-  4) 调用地址统一走 http://dimond.top:19xxx，不出现 obs.dimond.top 或 18xxx。
+  4) 调用地址统一走 http://dimond.top:18xxx，不出现 obs.dimond.top 或 19xxx。
   5) registry.normalize_tool_payload 支持完整字段（name/doc_md/port/display_name）。
   6) Python 语法编译通过。
 
@@ -57,12 +57,12 @@ def run():
     check("hub homepage references EXAMPLE_TOOL", "EXAMPLE_TOOL" in app)
     for token in ("OBS", "/upload/init", "/upload/complete", "/ws", "/notice"):
         check("hub example tool doc mentions %s" % token, token in reg)
-    check("example tool doc uses dimond.top:19xxx", "http://dimond.top:19" in reg)
+    check("example tool doc uses dimond.top:18xxx", "http://dimond.top:18" in reg)
 
-    # 4) 调用地址统一 dimond.top:19xxx，无旧域名/18xxx
-    check("hub docs use dimond.top:19xxx", "http://dimond.top:19" in app)
+    # 4) 调用地址统一 dimond.top:18xxx，无旧域名/19xxx
+    check("hub docs use dimond.top:18xxx", "http://dimond.top:18" in app)
     check("hub app no obs.dimond.top", "obs.dimond.top" not in app)
-    check("hub app no 18xxx", not re.findall(r"18\d{3}", app))
+    check("hub app no 19xxx", not re.findall(r"19\d{3}", app))
 
     # 5) registry.normalize_tool_payload 支持完整字段
     check("registry normalize keeps full name", '"name" in body' in reg or "name" in reg)

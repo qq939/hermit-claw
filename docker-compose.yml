@@ -19,20 +19,20 @@ services:
       openclaw-network:
         ipv4_address: 172.30.0.10
     ports:
-      - "19790:18790"
+      - "18790:18790"
     volumes:
       - ./config/openclaw:/agent-config:ro
     environment:
       - OPENCLAW_GATEWAY_TOKEN=2ac145e2572b9b2fb44717b520c22588858403a75d4a6ea2
 
-  control-19080:
+  control-18080:
     build:
       context: .
       dockerfile: control/Dockerfile
-    container_name: hermit-control-19080
+    container_name: hermit-control-18080
     restart: unless-stopped
     ports:
-      - "19080:8080"
+      - "18080:8080"
     environment:
       # 注意：这里**故意不再**用 ${PWD} 传宿主机路径。
       # ${PWD} 取的是「执行 compose 的那个 shell 的环境变量」：从别的目录跑 compose
@@ -56,6 +56,37 @@ services:
       - ../frpc:/Users/jimjiang/Downloads/frpc
       - ../frp:/Users/jimjiang/Downloads/frp
       - ./config/rules:/config/rules
+    networks:
+      - openclaw-network
+
+  # 18000-18079 为工具类端口段：obs 图床(18000) / email 邮件(18001)。
+  obs-18000:
+    build:
+      context: ./tools/obs
+    container_name: hermit-tool-obs-18000
+    restart: unless-stopped
+    ports:
+      - "18000:8082"
+    environment:
+      - HOST_PORT=18000
+      - TOOLS_HUB_URL=http://host.docker.internal:18081
+    volumes:
+      - ./tools/obs/obs:/app/obs
+    networks:
+      - openclaw-network
+
+  email-18001:
+    build:
+      context: ./tools/email
+    container_name: hermit-tool-email-18001
+    restart: unless-stopped
+    ports:
+      - "18001:8082"
+    environment:
+      - HOST_PORT=18001
+      - TOOLS_HUB_URL=http://host.docker.internal:18081
+    volumes:
+      - ./tools/email/asset:/app/asset:ro
     networks:
       - openclaw-network
 
@@ -90,7 +121,7 @@ services:
     container_name: hermit-ssh-gateway
     restart: unless-stopped
     ports:
-      - "19800:8080"
+      - "18800:8080"
     environment:
       - DOCKER_HOST=host.docker.internal
       - SSH_USER=agent

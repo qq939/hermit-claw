@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""TDD 校验：control 面板「注册」与 19081 Hub 必须共用同一份注册表。
+"""TDD 校验：control 面板「注册」与 18081 Hub 必须共用同一份注册表。
 
 背景（踩过的两个坑）：
-  1) 注册表分叉：control 写 /config/tools_registry.json（宿主机 config/），而 19081 Hub 卡片
+  1) 注册表分叉：control 写 /config/tools_registry.json（宿主机 config/），而 18081 Hub 卡片
      的容器里根本没有 /config，它的 server.js 就把路径改到自己的 logs/ 下 →
      面板注册成功的卡片在 Hub 首页/接口里看不到。
   2) 卡片挂载指错目录：compose 里 HOST_CONFIG_ROOT=${PWD}/config，${PWD} 取的是「执行 compose
@@ -22,7 +22,7 @@
      7) 每张卡片的 /agent-config 与 workspace 挂载源都在本仓库下（防止挂到别的目录）。
      8) Hub 卡片挂到了 config/registry，且容器内 /config/tools_registry.json 可读。
      9) Hub /api/tools 的工具集合 == 宿主机注册表的集合（无分叉）。
-    10) 闭环：面板注册 19088-test → Hub 立刻能看到 → 注销后消失（用后即还原）。
+    10) 闭环：面板注册 18990-test → Hub 立刻能看到 → 注销后消失（用后即还原）。
 
 超时机制：整个校验在守护线程中执行，主线程 join(timeout)，超时判失败。
 """
@@ -36,11 +36,11 @@ import urllib.request
 
 TIMEOUT_SECONDS = 180
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CONTROL = os.environ.get("CONTROL_URL", "http://localhost:19080")
-HUB = os.environ.get("HUB_URL", "http://localhost:19081")
-CONTROL_CONTAINER = "hermit-control-19080"
-HUB_CONTAINER = "19081-hub"
-E2E_CARD = "19088-test"          # 闭环测试用（测完会注销，恢复原状）
+CONTROL = os.environ.get("CONTROL_URL", "http://localhost:18080")
+HUB = os.environ.get("HUB_URL", "http://localhost:18081")
+CONTROL_CONTAINER = "hermit-control-18080"
+HUB_CONTAINER = "18081-hub"
+E2E_CARD = "18990-test"          # 闭环测试用（测完会注销，恢复原状）
 REGISTRY_HOST = os.path.join(ROOT, "config", "registry", "tools_registry.json")
 
 failures = []
@@ -119,7 +119,7 @@ def run_static():
     check("register message built from template",
           "build_register_message" in app and "REGISTER_MESSAGE" in app)
     check("register instruction mentions hub api + /ask/claude + doc_md",
-          "19081/api/tools" in app and "/ask/claude" in app and "doc_md" in app)
+          "18081/api/tools" in app and "/ask/claude" in app and "doc_md" in app)
     check("register supports dry_run", 'dry_run' in register_body)
     check("unregister still removes by real name",
           "unregister_tool_file(record[\"name\"])" in app)
@@ -195,7 +195,7 @@ def run_live():
                         method="POST", payload={})
         msg = dry.get("message") or ""
         check("dry_run returns instruction", dry.get("dry_run") is True and len(msg) > 100)
-        check("instruction carries hub api url", "19081/api/tools" in msg)
+        check("instruction carries hub api url", "18081/api/tools" in msg)
         check("instruction carries port + tool name",
               str(dry.get("host_port")) in msg and (dry.get("tool_name") or "") in msg)
         check("instruction demands /ask/claude + doc_md",
@@ -207,10 +207,10 @@ def run_live():
         print("   -> %s" % e, flush=True)
 
     # 模拟"容器自己注册"：直接 POST 完整记录到 Hub → 面板应显示已注册（按 container_name 匹配）
-    tool_name = "test"   # derive_tool_name("19088-test")
+    tool_name = "test"   # derive_tool_name("18990-test")
     record = {
         "name": tool_name, "display_name": E2E_CARD, "description": "自注册闭环测试",
-        "port": 19088, "container_name": E2E_CARD, "agent_type": "claude",
+        "port": 18990, "container_name": E2E_CARD, "agent_type": "claude",
         "doc_md": "# %s\n\n## API\n\n| 方法 | 路径 | 说明 |\n|---|---|---|\n| GET | /ask/claude | 问答 |\n" % E2E_CARD,
     }
     try:

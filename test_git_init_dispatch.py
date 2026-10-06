@@ -28,7 +28,7 @@ import urllib.request
 
 TIMEOUT_SECONDS = 120
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CONTROL = os.environ.get("CONTROL_URL", "http://localhost:19080")
+CONTROL = os.environ.get("CONTROL_URL", "http://localhost:18080")
 
 failures = []
 skips = []

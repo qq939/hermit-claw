@@ -36,8 +36,8 @@ import urllib.request
 
 TIMEOUT_SECONDS = 180
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CONTROL = os.environ.get("CONTROL_URL", "http://localhost:19080")
-CARD = os.environ.get("PROFILE_CARD", "19083-email")
+CONTROL = os.environ.get("CONTROL_URL", "http://localhost:18080")
+CARD = os.environ.get("PROFILE_CARD", "18083-email")
 
 failures = []
 skips = []

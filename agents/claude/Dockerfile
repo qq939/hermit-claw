@@ -30,7 +30,7 @@ ENV CLAUDE_CODE_SKIP_ONBOARDING=true
 ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 # 看门狗：web app（8082）没响应就重跑 start.sh。CMD 里只拉一次 start.sh，偶发失败
-# 会导致卡片服务一直不起来（实测 19081-hub 重启后就是这样），所以要有自愈。
+# 会导致卡片服务一直不起来（实测 18081-hub 重启后就是这样），所以要有自愈。
 COPY agents/claude/hermit-watchdog.sh /usr/local/bin/hermit-watchdog.sh
 RUN chmod +x /usr/local/bin/hermit-watchdog.sh
 
