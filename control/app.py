@@ -211,6 +211,8 @@ def create_app(docker_client=None):
     app.config["DOCKER_CLIENT"] = docker_client
     app.config["CONFIG_ROOT"] = "/config"
     app.config["WORKSPACES_ROOT"] = "/workspaces"
+    # LOGS_ROOT: 容器内的 logs 挂载点（compose 里 ./logs:/logs）；文件操作要用它而不是 HOST_LOGS_ROOT
+    app.config["LOGS_ROOT"] = "/logs"
     app.config["HOST_CONFIG_ROOT"] = os.environ.get(HOST_CONFIG_ROOT_ENV) or app.config["CONFIG_ROOT"]
     # 容器内将 host.docker.internal 替换为宿主机实际路径（如果是相对路径 ./config）
     host_cfg = app.config["HOST_CONFIG_ROOT"]
@@ -506,6 +508,25 @@ def create_app(docker_client=None):
         return {path: {"bind": "/config", "mode": "rw"}}
 
     # ---- 每张卡片自己的注入文件 project/claudeagent.md（核心目标）----
+    def _prepare_workspace_dirs(container_name):
+        """准备好卡片的 workspace / logs / sessions 目录，并放成 777（容器内 agent 要能写）。
+
+        用**容器内路径**（/workspaces、/logs）——它们就是宿主机上对应的 bind 目录；
+        千万别用 HOST_* （那是宿主机路径，只该传给 Docker 当 bind source）。
+        权限必须是 777：建卡后 control 会通过 SFTP 把规则文件写进 project/，写不进去卡片就废了。
+        """
+        ws_root = app.config["WORKSPACES_ROOT"]
+        log_root = app.config.get("LOGS_ROOT", "/logs")
+        for d in (f"{log_root}/{container_name}",
+                  f"{ws_root}/{container_name}",
+                  f"{ws_root}/{container_name}/sessions"):
+            try:
+                os.makedirs(d, mode=0o777, exist_ok=True)
+                os.chmod(d, 0o777)
+                os.chown(d, AGENT_UID, AGENT_GID)
+            except Exception as e:
+                print("[workspace] prepare %s failed: %s" % (d, e), flush=True)
+
     def _agent_profile_path(container_name):
         """claudeagent.md 的路径（**容器内路径**）。
 
@@ -519,10 +540,15 @@ def create_app(docker_client=None):
         """确保卡片有 claudeagent.md —— **默认空文件**（不写模板、绝不覆盖已有内容）。
 
         内容由用户通过面板「任务」按钮或 GET/PUT API 填写；空文件 run_claude.js 不注入。
+
+        注意（踩过的坑）：这里会**先于 Docker** 创建卡片工作目录，所以必须把目录放成 777。
+        否则 Docker 发现目录已存在就不会再按 777 建，容器里的 agent 用户（uid 501）写不进去，
+        建卡后的规则下发（SFTP 写 project/）会 Permission denied，卡片一出生就"失联"
+        （没有 run_claude.js/start.sh，初始消息直接 MODULE_NOT_FOUND）。
         """
         path = _agent_profile_path(container_name)
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            _prepare_workspace_dirs(container_name)
             if not os.path.exists(path):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("")
@@ -555,13 +581,12 @@ def create_app(docker_client=None):
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(app.config["HOST_WORKSPACES_ROOT"]), "logs")
         host_tools_root = app.config["HOST_TOOLS_ROOT"]
-        os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
-        os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
-        os.makedirs(f"{host_workspaces_root}/{container_name}/sessions", exist_ok=True)
-        os.chown(f"{host_logs_root}/{container_name}", 501, 20)
-        os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
-        os.chown(f"{host_workspaces_root}/{container_name}/sessions", 501, 20)
-        # 每张卡片自己的注入文件（核心目标）——不存在则写模板
+        # 注意：control 自己跑在容器里，创建目录/改权限必须用**容器内路径**（/workspaces、/logs）；
+        # host_* 只是传给 Docker 当 bind source 的宿主机路径，拿它做 os.makedirs 会写进 control
+        # 自己文件系统里一个叫 "C:" 的假目录（踩过）。目录必须是 777，否则容器里 agent(501) 写不进去，
+        # 建卡后的规则下发会 Permission denied，卡片一出生就"失联"。
+        _prepare_workspace_dirs(container_name)
+        # 每张卡片自己的注入文件（核心目标）——默认空文件
         ensure_agent_profile(container_name, host_port, agent_type)
         if agent_type in ("claude", "ollama"):
             log_bind = "/home/agent/.claude/workspace/project/logs"
@@ -715,10 +740,8 @@ def create_app(docker_client=None):
         host_workspaces_root = app.config["HOST_WORKSPACES_ROOT"]
         host_logs_root = app.config.get("HOST_LOGS_ROOT") or os.path.join(os.path.dirname(host_workspaces_root), "logs")
         host_tools_root = app.config["HOST_TOOLS_ROOT"]
-        os.makedirs(f"{host_logs_root}/{container_name}", exist_ok=True)
-        os.makedirs(f"{host_workspaces_root}/{container_name}", exist_ok=True)
-        os.chown(f"{host_logs_root}/{container_name}", 501, 20)
-        os.chown(f"{host_workspaces_root}/{container_name}", 501, 20)
+        # 同 create_agent：目录准备用容器内路径 + 777（见 _prepare_workspace_dirs 的说明）
+        _prepare_workspace_dirs(container_name)
         # 每张卡片自己的注入文件（核心目标）——重建时也要保证存在（不覆盖已有内容）
         ensure_agent_profile(container_name, host_port, agent_type)
         if agent_type in ("claude", "ollama"):
