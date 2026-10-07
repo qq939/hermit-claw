@@ -48,8 +48,12 @@ def run():
     check("control add_frpc_rule uses cfg_path", "cfg_path = resolve_frpc_config_path()" in app)
 
     # 4) docker-compose 同时挂载两种目录
-    check("compose mounts ../frpc", "${PWD}/../frpc:/Users/jimjiang/Downloads/frpc" in compose)
-    check("compose mounts ../frp", "${PWD}/../frp:/Users/jimjiang/Downloads/frp" in compose)
+    #    注意：路径已从 ${PWD}/../frpc 改成相对路径 ../frpc —— compose 的相对路径按
+    #    compose 文件所在目录解析，跟执行 compose 的 shell 的 ${PWD} 无关，更可靠。
+    check("compose mounts ../frpc", "../frpc:/Users/jimjiang/Downloads/frpc" in compose)
+    check("compose mounts ../frp", "../frp:/Users/jimjiang/Downloads/frp" in compose)
+    active = [l for l in compose.splitlines() if not l.strip().startswith("#")]
+    check("compose has no active ${PWD} dependency", all("${PWD}" not in l for l in active))
 
 
 if __name__ == "__main__":

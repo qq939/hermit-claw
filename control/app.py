@@ -1233,16 +1233,18 @@ def create_app(docker_client=None):
         except docker.errors.NotFound:
             return jsonify({"error": "Container not found"}), 404
 
-    def _dispatch_to_agent(container, container_name, agent_type, message):
+    def _dispatch_to_agent(container, container_name, agent_type, message, with_image=False):
         """把一条指令交给容器内的 agent 执行，返回 (ok, error)。
 
         claude/ollama 走容器内 run_claude.js（= 容器内置接口），openclaw 走 openclaw agent。
-        供「发送」按钮与「注册」按钮共用。
+        with_image=True 时带上 CLAUDE_IMG=1：run_claude.js 会把 project/tmp.png 追加到消息里
+        （这就是"给卡片发图片"的落点，见 api_upload_image）。
         """
         if agent_type in ("claude", "ollama"):
             agent_states[container_name] = "thinking"
             msg_b64 = base64.b64encode(message.encode("utf-8")).decode("ascii")
-            script = (f"CLAUDE_PERMISSION_MODE=bypassPermissions CLAUDE_MSG='{msg_b64}' "
+            img_env = "CLAUDE_IMG=1 " if with_image else ""
+            script = (f"{img_env}CLAUDE_PERMISSION_MODE=bypassPermissions CLAUDE_MSG='{msg_b64}' "
                       "node /home/agent/.claude/workspace/project/run_claude.js")
             try:
                 container.exec_run(["/bin/sh", "-c", f"echo '{script}' > /tmp/send_msg.sh && chmod +x /tmp/send_msg.sh"], user=AGENT_RUNTIME_USER)
@@ -1269,20 +1271,94 @@ def create_app(docker_client=None):
             return False, str(e)
         return True, None
 
+    @app.post("/api/agents/<path:name>/image")
+    def api_upload_image(name):
+        """把一张图片写进卡片工作目录（默认 tmp.png），供 run_claude.js 的图文模式使用。
+
+        路线：面板（粘贴确认 / 拖入 / 选择文件）→ base64 → 宿主机 workspaces/<name>/tmp.png
+        （= 容器内 /home/agent/.claude/workspace/project/tmp.png）→ 点「发送」时 control 带
+        CLAUDE_IMG=1 调 run_claude.js → 它把 ![image](file://.../tmp.png) 追加到消息里。
+        """
+        body = request.get_json(silent=True) or {}
+        img = body.get("img")
+        # 只允许写在卡片工作目录内的简单文件名，防目录穿越
+        filename = os.path.basename(str(body.get("filename") or "tmp.png").strip() or "tmp.png")
+        if not isinstance(img, str) or not img.strip():
+            return jsonify({"error": "img (base64 or data URL) is required"}), 400
+        if img.strip().startswith("data:") and "," in img:
+            img = img.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(img, validate=False)
+        except Exception as e:
+            return jsonify({"error": "invalid base64: %s" % e}), 400
+        if not raw:
+            return jsonify({"error": "empty image"}), 400
+        try:
+            container = _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or {}
+        agent_type = labels.get("hermit.agent_type", "")
+
+        path = os.path.join(app.config["WORKSPACES_ROOT"], name, filename)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(raw)
+            try:
+                os.chown(path, AGENT_UID, AGENT_GID)
+                os.chmod(path, 0o664)
+            except Exception:
+                pass
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "container_name": name, "filename": filename,
+                        "bytes": len(raw),
+                        "container_path": project_path_for_agent_type(agent_type) + "/" + filename})
+
+    @app.delete("/api/agents/<path:name>/image")
+    def api_delete_image(name):
+        """删除卡片工作目录里待发送的图片（默认 tmp.png）。"""
+        try:
+            _require_managed(name)
+        except PermissionError as e:
+            return jsonify({"error": str(e)}), 403
+        except docker.errors.NotFound:
+            return jsonify({"error": "Container not found"}), 404
+        filename = os.path.basename(str(request.args.get("filename") or "tmp.png"))
+        path = os.path.join(app.config["WORKSPACES_ROOT"], name, filename)
+        removed = False
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                removed = True
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "removed": removed, "filename": filename})
+
     @app.post("/api/agents/<path:name>/send-message")
     def api_send_message(name):
         body = request.get_json(silent=True) or {}
         message = (body.get("message") or "").strip()
+        with_image = bool(body.get("with_image"))
         try:
             container = _require_managed(name)
             labels = ((getattr(container, "attrs", {}) or {}).get("Config", {}) or {}).get("Labels", {}) or (getattr(container, "labels", {}) or {})
             agent_type = labels.get("hermit.agent_type", "")
             default_msg = INITIAL_MESSAGE.format(agent="claude" if agent_type in ("claude", "ollama") else "openclaw")
-            ok, err = _dispatch_to_agent(container, name, agent_type, message or default_msg)
+            # 带图发送：确认 tmp.png 真的在卡片工作目录里（run_claude.js 会读它）
+            image_attached = False
+            if with_image:
+                image_attached = os.path.exists(os.path.join(app.config["WORKSPACES_ROOT"], name, "tmp.png"))
+            ok, err = _dispatch_to_agent(container, name, agent_type, message or default_msg,
+                                         with_image=image_attached)
             if not ok:
                 return jsonify({"error": err}), 500
             return jsonify({"ok": True, "container_name": name, "message": message,
-                            "agent_type": agent_type, "sent_at": now_iso()})
+                            "agent_type": agent_type, "image_attached": image_attached,
+                            "sent_at": now_iso()})
         except PermissionError as e:
             return jsonify({"error": str(e)}), 403
         except docker.errors.NotFound:
@@ -2385,6 +2461,11 @@ def create_app(docker_client=None):
       .task-actions {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
       .task-actions button {{ padding: 5px 14px; }}
       .task-hint {{ font-size: 11px; color: var(--muted); }}
+      .cmd-bar .img-preview {{
+        width: 56px; height: 56px; object-fit: cover; border-radius: 6px;
+        border: 1px solid rgba(58,227,116,0.6); cursor: pointer;
+      }}
+      .cmd-bar .img-remove {{ background: #7f1d1d; border-color: #991b1b; }}
       .git-tools {{
         display: none;
         align-items: center;
@@ -2654,8 +2735,12 @@ def create_app(docker_client=None):
             <button class="task-btn" data-action="task" title="编辑这张卡片自己的注入文件 claudeagent.md（核心目标），保存后每次 Claude 调用都会带上它">任务</button>
           </div>
           <div class="cmd-bar">
-            <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容" style="flex:1; resize:vertical; min-height:60px;"></textarea>
+            <textarea class="cmd-input" data-role="cmd-input" placeholder="输入对话内容（支持 Ctrl+V 粘贴图片、拖入图片、或点右侧「图片」选择）" style="flex:1; resize:vertical; min-height:60px;"></textarea>
             <button data-action="send">发送</button>
+            <button data-action="pick-image" title="选择图片上传到该卡片（等价于粘贴/拖入）">图片</button>
+            <input type="file" class="img-input" accept="image/*" style="display:none">
+            <img class="img-preview" alt="待发送图片" title="待发送的图片（点右侧「移除图片」可取消）" style="display:none">
+            <button class="img-remove" data-action="remove-image" style="display:none" title="移除待发送图片">移除图片</button>
           </div>
           <pre id="log-${{item.container_name}}" class="log-view">${{item.logs || ""}}</pre>
           <iframe id="ssh-${{item.container_name}}" class="ssh-view" style="display:none; width:100%; height:400px; border:1px solid #ccc;" src="" allow="fullscreen"></iframe>
@@ -3039,6 +3124,87 @@ def create_app(docker_client=None):
           await refreshCards();
         }};
         
+        // ---- 图片：选择文件 / 拖入 / 粘贴（粘贴必须弹框确认"是否上传剪切板中的图片"）----
+        const imgInput = div.querySelector('.img-input');
+        const imgPreview = div.querySelector('.img-preview');
+        const imgRemove = div.querySelector('.img-remove');
+        let hasImage = false;
+        const setImagePending = (on, dataUrl) => {{
+          hasImage = on;
+          if (on) {{
+            if (dataUrl) imgPreview.src = dataUrl;
+            imgPreview.style.display = "block";
+            imgRemove.style.display = "inline-block";
+          }} else {{
+            imgPreview.removeAttribute("src");
+            imgPreview.style.display = "none";
+            imgRemove.style.display = "none";
+          }}
+        }};
+        const uploadImage = async (dataUrl, source) => {{
+          try {{
+            const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/image`, {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ img: dataUrl, filename: "tmp.png" }}),
+            }});
+            const d = await r.json();
+            if (!r.ok) {{
+              logBox.textContent += `\nERROR: ${{d.error || `HTTP ${{r.status}}`}}\n`;
+              return;
+            }}
+            setImagePending(true, dataUrl);
+            logBox.textContent += `\n[图片已上传] 来源=${{source}} · ${{d.filename}}（${{d.bytes}} 字节）→ ${{d.container_path}}`
+              + `\n  点「发送」时 run_claude.js 会带 CLAUDE_IMG=1，把图片追加到消息里\n`;
+            logBox.scrollTop = logBox.scrollHeight;
+          }} catch (e) {{
+            logBox.textContent += `\nERROR: ${{e}}\n`;
+          }}
+        }};
+        const readAsDataUrl = (file, source) => {{
+          const fr = new FileReader();
+          fr.onload = () => uploadImage(String(fr.result), source);
+          fr.readAsDataURL(file);
+        }};
+        cmdInput.addEventListener("paste", (e) => {{
+          const items = (e.clipboardData && e.clipboardData.items) || [];
+          for (const it of items) {{
+            if (it.kind === "file" && it.type && it.type.indexOf("image/") === 0) {{
+              const f = it.getAsFile();
+              if (!f) continue;
+              e.preventDefault();
+              const mb = (f.size / 1048576).toFixed(2);
+              if (confirm(`检测到剪切板中的图片（${{it.type}}，${{mb}} MB）\n是否上传到容器「${{item.container_name}}」？`)) {{
+                readAsDataUrl(f, "粘贴");
+              }} else {{
+                logBox.textContent += `\n[已取消] 未上传剪切板中的图片\n`;
+              }}
+              return;
+            }}
+          }}
+        }});
+        div.querySelector('button[data-action="pick-image"]').onclick = (e) => {{ e.stopPropagation(); imgInput.click(); }};
+        imgInput.onchange = () => {{
+          const f = imgInput.files && imgInput.files[0];
+          if (f) readAsDataUrl(f, "选择文件");
+          imgInput.value = "";
+        }};
+        div.addEventListener("dragover", (e) => {{ e.preventDefault(); }});
+        div.addEventListener("drop", (e) => {{
+          const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (f && f.type && f.type.indexOf("image/") === 0) {{
+            e.preventDefault();
+            readAsDataUrl(f, "拖入");
+          }}
+        }});
+        imgPreview.onclick = () => {{ logBox.textContent += `\n[提示] 这是待发送的图片；点「移除图片」可取消\n`; }};
+        imgRemove.onclick = async (e) => {{
+          e.stopPropagation();
+          try {{ await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/image`, {{ method: "DELETE" }}); }} catch (err) {{}}
+          setImagePending(false);
+          logBox.textContent += `\n[图片已移除] 下次发送不带图片\n`;
+        }};
+
         div.querySelector('button[data-action="send"]').onclick = () => sendMessage();
         
         const cardKey = `card_${{item.container_name}}`;
@@ -3051,18 +3217,20 @@ def create_app(docker_client=None):
         
         const sendMessage = async () => {{
           const msg = (cmdInput.value || "").trim();
-          if (!msg) return;
+          if (!msg && !hasImage) return;
           window.cardStates[item.container_name] = logBox.textContent;
-          window.cardStates[item.container_name] += "\\n" + formatTime() + " $ " + msg + "\\n";
+          window.cardStates[item.container_name] += "\\n" + formatTime() + " $ " + (msg || "(仅图片)") + "\\n";
           logBox.textContent = window.cardStates[item.container_name];
           logBox.scrollTop = logBox.scrollHeight;
           cmdInput.value = "";
+          const withImage = hasImage;
           
           const r = await fetch(`/api/agents/${{encodeURIComponent(item.container_name)}}/send-message`, {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ message: msg }}),
+            body: JSON.stringify({{ message: msg, with_image: withImage }}),
           }});
+          if (withImage) setImagePending(false);   // 图片已交给这次发送，避免下次重复带
           if (!r.ok) {{
             const d = await r.json();
             window.cardStates[item.container_name] += `ERROR: ${{d.error || `HTTP ${{r.status}}`}}\\n`;

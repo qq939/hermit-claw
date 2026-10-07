@@ -130,6 +130,30 @@ echo "$(git rev-parse --short HEAD) 描述本次变更" >> logs/commit.txt
 - 你可以**读**这个文件来确认自己的目标（`project/claudeagent.md`），但不要擅自改写用户写的内容。
 
 ================================================================================
+六、给卡片发图片（面板 → 容器）
+================================================================================
+
+面板上每张卡片都支持发图：**粘贴（Ctrl+V，会弹框确认是否上传剪切板图片）/ 把图片拖进卡片 / 点「图片」选择文件**。
+
+路线（一层层落到哪）：
+
+```
+浏览器（粘贴/拖拽/选择文件）→ dataURL
+  → POST http://<control>:19080/api/agents/<容器名>/image     # control 解码 base64
+  → 宿主机 workspaces/<容器名>/tmp.png
+    = 容器内 /home/agent/.claude/workspace/project/tmp.png     # chown 501:20，agent 可读
+  → 点「发送」：control 以 CLAUDE_IMG=1 + CLAUDE_MSG=... 调 run_claude.js
+  → run_claude.js 把 ![image](file:///home/agent/.claude/workspace/project/tmp.png) 追加到消息
+  → claude CLI 读该文件（图文模式）
+```
+
+要点：
+
+- 图片固定落在 `tmp.png`（run_claude.js 的默认路径）；发送一次即视为已消费，面板会清掉待发送状态。
+- 「移除图片」按钮 = `DELETE /api/agents/<容器名>/image`（删 tmp.png）。
+- 你也可以直接读 `project/tmp.png` 处理用户刚发的图；`tmp.png` 别提交进 git（写进 .gitignore）。
+
+================================================================================
 规范索引（按需查阅 /agent-config/skills/）
 ================================================================================
 
